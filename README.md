@@ -10,3 +10,4 @@ A tiny, production-style project that **optimizes** and **serves** LLMs:
 - Server: loads the artifact and exposes a streaming `/generate` API.
 
 We’ll start with a CPU-friendly model (`TinyLlama/TinyLlama-1.1B-Chat-v1.0`) so it runs everywhere. Later you can switch to GPU and 7B models.
+# TorchWeave_LLM

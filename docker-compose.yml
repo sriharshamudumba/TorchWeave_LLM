@@ -1,0 +1,25 @@
+version: "3.9"
+services:
+  optimizer:
+    build: ./services/optimizer
+    environment:
+      ART_DIR: /artifacts
+    volumes:
+      - ./artifacts:/artifacts
+    ports:
+      - "8081:8000"
+    # For GPU runs later, you can enable the NVIDIA runtime if available.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: ["gpu"]
+    # runtime: nvidia
+
+  server:
+    build: ./services/server
+    volumes:
+      - ./artifacts:/artifacts
+    ports:
+      - "8082:8000"
+    # runtime: nvidia

@@ -1,25 +1,37 @@
-version: "3.9"
-services:
-  optimizer:
-    build: ./services/optimizer
-    environment:
-      ART_DIR: /artifacts
-    volumes:
-      - ./artifacts:/artifacts
-    ports:
-      - "8081:8000"
-    # For GPU runs later, you can enable the NVIDIA runtime if available.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - capabilities: ["gpu"]
-    # runtime: nvidia
+name: torchweave_llm_server
 
+volumes:
+  artifacts: {}
+
+services:
   server:
-    build: ./services/server
-    volumes:
-      - ./artifacts:/artifacts
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    env_file:
+      - .env
     ports:
-      - "8082:8000"
-    # runtime: nvidia
+      - "8000:8000"
+    volumes:
+      - artifacts:/artifacts
+      - ./server/src:/app/src:ro
+    command: ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    # GPU access (falls back to CPU if unavailable)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
+    gpus: all
+
+  optimizer:
+    build:
+      context: ./optimizer
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - artifacts:/artifacts
+    command: ["python", "-m", "src.optimizer"]

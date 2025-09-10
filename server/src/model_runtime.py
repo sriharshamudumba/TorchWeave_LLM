@@ -1,104 +1,209 @@
 import os
-from typing import List, Tuple
-
+import time
+from typing import Optional, List, Dict, Any
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-# Pick GPU if available, else CPU
-Device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-DTYPE = torch.float16 if torch.cuda.is_available() else torch.float32
-
-HF_MODEL = os.getenv("HF_MODEL", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-SEED = int(os.getenv("SEED", "42"))
-
-_torch_rng = torch.Generator(device=Device)
-_torch_rng.manual_seed(SEED)
-
-tokenizer = AutoTokenizer.from_pretrained(HF_MODEL)
-if tokenizer.pad_token_id is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-# Load from artifact dir if optimizer staged weights
-artifact_dir = os.getenv("ARTIFACT_MODEL_DIR")
-if artifact_dir and os.path.exists(artifact_dir):
-    model_path = artifact_dir
-else:
-    model_path = HF_MODEL
-
-model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=DTYPE)
-model.to(Device)
-model.eval()
-
-
-@torch.inference_mode()
-def first_forward(input_ids: torch.Tensor, attention_mask: torch.Tensor):
-    """
-    Initial forward to obtain logits and past for a fresh sequence batch.
-    input_ids: (B, T)
-    returns: logits (B, V), past_key_values
-    """
-    out = model(
-        input_ids=input_ids.to(Device),
-        attention_mask=attention_mask.to(Device),
-        use_cache=True,
-    )
-    last_logits = out.logits[:, -1, :]
-    return last_logits, out.past_key_values
-
-
-@torch.inference_mode()
-def next_forward(
-    last_tokens: torch.Tensor, attention_mask: torch.Tensor, past_key_values
-):
-    """
-    One-token decode step with shared past_key_values.
-    last_tokens: (B, 1)
-    attention_mask: (B, S+1)
-    """
-    out = model(
-        input_ids=last_tokens.to(Device),
-        attention_mask=attention_mask.to(Device),
-        past_key_values=past_key_values,
-        use_cache=True,
-    )
-    logits = out.logits[:, -1, :]
-    return logits, out.past_key_values
-
-
-def split_past(past_batched, batch_sizes: List[int]):
-    """
-    Split a batched past_key_values into per-request chunks by batch dimension.
-    """
-    idxs = []
-    cur = 0
-    for b in batch_sizes:
-        idxs.append((cur, cur + b))
-        cur += b
-    per = []
-    for (start, end) in idxs:
-        sl = []
-        for layer in past_batched:
-            k, v = layer
-            sl.append(
-                (
-                    k[start:end, ...].contiguous(),
-                    v[start:end, ...].contiguous(),
-                )
+class ModelRuntime:
+    """Handles model loading and inference operations"""
+    
+    def __init__(self, model_path: str):
+        """Initialize the model runtime
+        
+        Args:
+            model_path: Path to the model directory
+        """
+        self.model_path = model_path
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+        
+        print(f"[ModelRuntime] Loading from {model_path}")
+        print(f"[ModelRuntime] Using device: {self.device}")
+        
+        # Load tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            
+        # Load model
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            torch_dtype=self.dtype,
+            device_map="auto" if torch.cuda.is_available() else None,
+            trust_remote_code=True
+        )
+        
+        if not torch.cuda.is_available():
+            self.model = self.model.to(self.device)
+            
+        self.model.eval()
+        
+        # Setup RNG
+        self.rng = torch.Generator(device=self.device)
+        
+        print(f"[ModelRuntime] Model loaded successfully")
+    
+    def get_vocab_size(self) -> int:
+        """Get vocabulary size"""
+        return len(self.tokenizer.get_vocab())
+    
+    def get_eos_token(self) -> str:
+        """Get EOS token string"""
+        return self.tokenizer.eos_token or "</s>"
+    
+    def get_eos_token_id(self) -> int:
+        """Get EOS token ID"""
+        return self.tokenizer.eos_token_id
+    
+    def tokenize(self, text: str) -> torch.Tensor:
+        """Tokenize text and return tensor"""
+        return self.tokenizer(text, return_tensors="pt").input_ids.to(self.device)
+    
+    def decode(self, token_ids: List[int], skip_special_tokens: bool = True) -> str:
+        """Decode token IDs to text"""
+        return self.tokenizer.decode(token_ids, skip_special_tokens=skip_special_tokens)
+    
+    def decode_single(self, token_id: int, skip_special_tokens: bool = True) -> str:
+        """Decode a single token ID to text"""
+        return self.tokenizer.decode([token_id], skip_special_tokens=skip_special_tokens)
+    
+    def generate_single(self, 
+                       prompt: str,
+                       max_new_tokens: int = 128,
+                       temperature: float = 0.7,
+                       top_k: int = 0,
+                       top_p: float = 0.9,
+                       seed: int = 42) -> str:
+        """Generate text for a single prompt (no batching)
+        
+        Args:
+            prompt: Input prompt
+            max_new_tokens: Maximum new tokens to generate
+            temperature: Sampling temperature
+            top_k: Top-k sampling (0 = disabled)
+            top_p: Top-p sampling
+            seed: Random seed
+            
+        Returns:
+            Generated text
+        """
+        # Set seed
+        self.rng.manual_seed(seed)
+        
+        # Tokenize input
+        input_ids = self.tokenize(prompt)
+        input_length = input_ids.shape[1]
+        
+        # Generation parameters
+        generation_kwargs = {
+            "input_ids": input_ids,
+            "max_new_tokens": max_new_tokens,
+            "do_sample": temperature > 0,
+            "temperature": temperature if temperature > 0 else 1.0,
+            "top_p": top_p,
+            "use_cache": True,
+            "pad_token_id": self.tokenizer.eos_token_id
+        }
+        
+        if top_k > 0:
+            generation_kwargs["top_k"] = top_k
+            
+        # Generate
+        with torch.no_grad():
+            output = self.model.generate(**generation_kwargs)
+            
+        # Decode only the new tokens
+        new_tokens = output[0][input_length:]
+        generated_text = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
+        
+        return generated_text
+    
+    def forward_batch(self, 
+                     input_ids: torch.Tensor,
+                     attention_mask: Optional[torch.Tensor] = None,
+                     past_key_values: Optional[tuple] = None) -> Dict[str, Any]:
+        """Forward pass for batched inputs
+        
+        Args:
+            input_ids: Input token IDs [batch_size, seq_len]
+            attention_mask: Attention mask [batch_size, seq_len]  
+            past_key_values: Past key-value cache
+            
+        Returns:
+            Dictionary with logits and past_key_values
+        """
+        with torch.no_grad():
+            outputs = self.model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                use_cache=True
             )
-        per.append(tuple(sl))
-    return per
-
-
-def cat_past(pasts: List[Tuple]):
-    """
-    Concatenate per-request pasts along batch axis.
-    """
-    layers = len(pasts[0])
-    cat_k = []
-    cat_v = []
-    for li in range(layers):
-        ks = [p[li][0] for p in pasts]
-        vs = [p[li][1] for p in pasts]
-        cat_k.append(torch.cat(ks, dim=0))
-        cat_v.append(torch.cat(vs, dim=0))
-    return tuple(zip(cat_k, cat_v))
+            
+        return {
+            "logits": outputs.logits,
+            "past_key_values": outputs.past_key_values
+        }
+    
+    def sample_tokens(self, 
+                     logits: torch.Tensor,
+                     temperatures: List[float],
+                     top_ks: List[int],
+                     top_ps: List[float],
+                     seeds: List[int]) -> List[int]:
+        """Sample next tokens from logits for multiple requests
+        
+        Args:
+            logits: Model logits [batch_size, vocab_size]
+            temperatures: Temperature for each request
+            top_ks: Top-k values for each request
+            top_ps: Top-p values for each request  
+            seeds: Random seeds for each request
+            
+        Returns:
+            List of sampled token IDs
+        """
+        batch_size = logits.shape[0]
+        sampled_tokens = []
+        
+        for i in range(batch_size):
+            # Set seed for this request
+            self.rng.manual_seed(seeds[i])
+            
+            # Get logits for this request
+            request_logits = logits[i, -1, :].unsqueeze(0)  # [1, vocab_size]
+            
+            # Apply temperature
+            if temperatures[i] > 0:
+                request_logits = request_logits / temperatures[i]
+            
+            # Apply top-k filtering
+            if top_ks[i] > 0:
+                top_k_logits, top_k_indices = torch.topk(request_logits, top_ks[i])
+                request_logits = torch.full_like(request_logits, float('-inf'))
+                request_logits.scatter_(1, top_k_indices, top_k_logits)
+            
+            # Apply top-p filtering
+            if top_ps[i] < 1.0:
+                sorted_logits, sorted_indices = torch.sort(request_logits, descending=True)
+                cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
+                
+                # Remove tokens with cumulative probability above the threshold
+                sorted_indices_to_remove = cumulative_probs > top_ps[i]
+                # Keep at least one token
+                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                sorted_indices_to_remove[..., 0] = 0
+                
+                indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
+                request_logits[indices_to_remove] = float('-inf')
+            
+            # Sample
+            if temperatures[i] > 0:
+                probs = torch.softmax(request_logits, dim=-1)
+                token_id = torch.multinomial(probs, num_samples=1, generator=self.rng)
+            else:
+                token_id = torch.argmax(request_logits, dim=-1, keepdim=True)
+            
+            sampled_tokens.append(token_id.item())
+        
+        return sampled_tokens

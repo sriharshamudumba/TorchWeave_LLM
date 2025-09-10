@@ -1,12 +1,12 @@
 # TorchWeave LLM: Inference Compiler for LLM Optimization
 
-[![TorchWeave CI](https://github.com/sriharshamudumba/TorchWeave_LLM/actions/workflows/ci.yml/badge.svg)](https://github.com/sriharshamudumba/TorchWeave_LLM/actions/workflows/ci.yml)
-[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-312/)
-[![Docker](https://img.shields.io/badge/docker-compose-blue.svg)](https://docs.docker.com/compose/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104-green.svg)](https://fastapi.tiangolo.com/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
+![TorchWeave CI](https://img.shields.io/badge/TorchWeave-CI-brightgreen)
+![Python 3.12](https://img.shields.io/badge/Python-3.12-blue)
+![Docker](https://img.shields.io/badge/Docker-Compatible-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-Framework-green)
+![PyTorch](https://img.shields.io/badge/PyTorch-ML-orange)
 
-A high-performance LLM inference server implementing continuous batching, per-request KV-cache management, and Server-Sent Events (SSE) streaming. Designed for production-scale deployment with 2-5x throughput improvements under concurrent load.
+A high-performance LLM inference server implementing continuous batching, per-request KV-cache management, and Server-Sent Events (SSE) streaming. Designed for production-scale deployment with **2-5x throughput improvements** under concurrent load.
 
 ## 🚀 Key Features
 
@@ -29,31 +29,11 @@ A high-performance LLM inference server implementing continuous batching, per-re
 
 ## 🏗️ Architecture
 
-```mermaid
-graph TB
-    subgraph "Client Layer"
-        C1[Client 1] --> LB[Load Balancer]
-        C2[Client 2] --> LB
-        C3[Client N] --> LB
-    end
-    
-    subgraph "TorchWeave Server"
-        LB --> API[FastAPI Server]
-        API --> SCH[Continuous Batch Scheduler]
-        SCH --> RT[Model Runtime]
-        RT --> GPU[GPU/CPU Inference]
-    end
-    
-    subgraph "Infrastructure"
-        OPT[Optimizer Sidecar] --> ART[Artifact Storage]
-        ART --> RT
-        API --> SSE[SSE Streaming]
-    end
-    
-    SSE --> C1
-    SSE --> C2
-    SSE --> C3
-```
+The system consists of three main components:
+
+1. **Inference Server**: FastAPI-based server with continuous batching scheduler
+2. **Model Optimizer**: Artifact staging and model preparation service
+3. **Shared Storage**: Container-native artifact management
 
 ## 🛠️ Technology Stack
 
@@ -91,10 +71,12 @@ TorchWeave_LLM/
 ## 🚦 Quick Start
 
 ### Prerequisites
+
 - Docker 27+ with Compose v2
 - (Optional) NVIDIA Container Toolkit for GPU acceleration
 
 ### 1. Clone and Configure
+
 ```bash
 git clone https://github.com/sriharshamudumba/TorchWeave_LLM.git
 cd TorchWeave_LLM
@@ -102,6 +84,7 @@ cp .env.example .env
 ```
 
 ### 2. Start Services
+
 ```bash
 # CPU inference
 docker compose up -d --build
@@ -111,12 +94,14 @@ docker compose --profile gpu up -d --build
 ```
 
 ### 3. Verify Health
+
 ```bash
 curl http://localhost:8000/health
 curl http://localhost:8000/model
 ```
 
 ### 4. Test Generation
+
 ```bash
 # Streaming with continuous batching
 curl -N -X POST http://localhost:8000/v1/generate \
@@ -135,12 +120,16 @@ curl -X POST http://localhost:8000/v1/generate_nobatch \
 
 #### `GET /health`
 Health check endpoint
+
+**Response:**
 ```json
 {"status": "ok"}
 ```
 
 #### `GET /model`
 Model information and capabilities
+
+**Response:**
 ```json
 {
   "vocab_size": 32000,
@@ -152,6 +141,8 @@ Model information and capabilities
 
 #### `POST /v1/generate`
 Streaming generation with continuous batching
+
+**Request:**
 ```bash
 curl -N -X POST http://localhost:8000/v1/generate \
   -H 'Content-Type: application/json' \
@@ -165,7 +156,7 @@ curl -N -X POST http://localhost:8000/v1/generate \
   }'
 ```
 
-**Response**: Server-Sent Events stream
+**Response:** Server-Sent Events stream
 ```
 event: ttft
 data: 0.856
@@ -180,6 +171,8 @@ data:
 
 #### `POST /v1/generate_nobatch`
 Baseline generation without batching
+
+**Request:**
 ```json
 {
   "prompt": "Your prompt here",
@@ -188,7 +181,7 @@ Baseline generation without batching
 }
 ```
 
-**Response**:
+**Response:**
 ```json
 {"text": "Generated response text"}
 ```
@@ -196,6 +189,7 @@ Baseline generation without batching
 ## ⚙️ Configuration
 
 ### Environment Variables
+
 ```bash
 # Model Configuration
 HF_MODEL=TinyLlama/TinyLlama-1.1B-Chat-v1.0
@@ -236,7 +230,7 @@ python scripts/bench.py --concurrency 8 --iters 24 --sse http://localhost:8000/v
 python scripts/bench.py --concurrency 1 --iters 24 --nobatch http://localhost:8000/v1/generate_nobatch
 ```
 
-**Benchmark Metrics**:
+**Benchmark Metrics:**
 - **TTFT**: Time to first token (latency)
 - **Tokens/sec**: Aggregate throughput
 - **Request time**: End-to-end request duration
@@ -246,24 +240,26 @@ python scripts/bench.py --concurrency 1 --iters 24 --nobatch http://localhost:80
 
 This repository uses feature branches to demonstrate specific technical implementations:
 
-- [`feature/continuous-batching`](../../tree/feature/continuous-batching) - Async scheduler with request merging
-- [`feature/kv-cache-optimization`](../../tree/feature/kv-cache-optimization) - Per-request memory management
-- [`feature/sse-streaming`](../../tree/feature/sse-streaming) - Real-time token streaming
-- [`feature/model-runtime`](../../tree/feature/model-runtime) - PyTorch inference engine
-- [`feature/docker-deployment`](../../tree/feature/docker-deployment) - Container orchestration
-- [`feature/performance-benchmarking`](../../tree/feature/performance-benchmarking) - Testing framework
-- [`integration/complete-system`](../../tree/integration/complete-system) - Full system integration
-- [`release/v1.0.0`](../../tree/release/v1.0.0) - Production release
+- `feature/continuous-batching` - Async scheduler with request merging
+- `feature/kv-cache-optimization` - Per-request memory management
+- `feature/sse-streaming` - Real-time token streaming
+- `feature/model-runtime` - PyTorch inference engine
+- `feature/docker-deployment` - Container orchestration
+- `feature/performance-benchmarking` - Testing framework
+- `integration/complete-system` - Full system integration
+- `release/v1.0.0` - Production release
 
 ## 🐳 Deployment
 
 ### Local Development
+
 ```bash
 docker compose up -d --build
 docker compose logs -f server
 ```
 
 ### Production (ECS/Kubernetes)
+
 The containerized architecture supports cloud deployment:
 
 ```yaml
@@ -293,6 +289,7 @@ spec:
 ```
 
 ### Scaling Considerations
+
 - **Horizontal**: Multiple server replicas with load balancing
 - **Vertical**: Increase `MAX_BATCH` and GPU memory
 - **Artifact Storage**: Shared volumes for model consistency
@@ -301,12 +298,14 @@ spec:
 ## 🛡️ Monitoring & Observability
 
 ### Built-in Metrics
+
 - Request-level TTFT tracking
-- Batch utilization monitoring  
+- Batch utilization monitoring
 - Token throughput measurement
 - Error rate and latency tracking
 
 ### Logging
+
 ```bash
 # Server logs
 docker compose logs -f server
@@ -322,7 +321,8 @@ docker compose logs server | grep "TTFT\|tokens/sec"
 
 ### Common Issues
 
-**Model Loading Fails**
+#### Model Loading Fails
+
 ```bash
 # Check optimizer completion
 docker compose logs optimizer | tail -5
@@ -331,13 +331,15 @@ docker compose logs optimizer | tail -5
 docker compose exec server ls -la /artifacts/model/
 ```
 
-**High TTFT**
+#### High TTFT
+
 ```bash
 # Reduce scheduler tick interval
 SCHEDULE_TICK_MS=10 docker compose restart server
 ```
 
-**GPU Not Detected**
+#### GPU Not Detected
+
 ```bash
 # Verify NVIDIA runtime
 docker run --rm --gpus all nvidia/cuda:12.1.1-base-ubuntu22.04 nvidia-smi
@@ -346,7 +348,8 @@ docker run --rm --gpus all nvidia/cuda:12.1.1-base-ubuntu22.04 nvidia-smi
 docker compose config | grep -A5 gpu
 ```
 
-**Memory Issues**
+#### Memory Issues
+
 ```bash
 # Reduce batch size
 MAX_BATCH=8 docker compose restart server
@@ -369,11 +372,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- Hugging Face Transformers for model infrastructure
-- FastAPI for high-performance web framework
-- PyTorch for deep learning capabilities
-- Docker for containerization platform
+- [Hugging Face Transformers](https://github.com/huggingface/transformers) for model infrastructure
+- [FastAPI](https://fastapi.tiangolo.com/) for high-performance web framework
+- [PyTorch](https://pytorch.org/) for deep learning capabilities
+- [Docker](https://www.docker.com/) for containerization platform
 
 ---
 
-**Built by [Sri Harsha Mudumba](https://github.com/sriharshamudumba)** | Inference Compiler for LLM Optimization
+**Built by Sri Harsha Mudumba** | *Inference Compiler for LLM Optimization*

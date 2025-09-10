@@ -1,29 +1,5 @@
 # TorchWeave LLM: Inference Compiler for LLM Optimization
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-![TorchWeave CI](https://img.shields.io/badge/TorchWeave-CI-brightgreen)
-![Python 3.12](https://img.shields.io/badge/Python-3.12-blue)
-![Docker](https://img.shields.io/badge/Docker-Compatible-blue)
-![FastAPI](https://img.shields.io/badge/FastAPI-Framework-green)
-![PyTorch](https://img.shields.io/badge/PyTorch-ML-orange)
-=======
->>>>>>> feature/dynamic-model-loader
-[![TorchWeave CI](https://github.com/sriharshamudumba/TorchWeave_LLM/actions/workflows/ci.yml/badge.svg)](https://github.com/sriharshamudumba/TorchWeave_LLM/actions/workflows/ci.yml)
-=======
-
->>>>>>> fe75b7316efd929d057922051f770f071b313933
-[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-312/)
-[![Docker](https://img.shields.io/badge/docker-compose-blue.svg)](https://docs.docker.com/compose/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104-green.svg)](https://fastapi.tiangolo.com/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
-<<<<<<< HEAD
-=======
->>>>>>> 71690ab (SSE Token Streaming with real-time token delivery and time-to-first-token)
->>>>>>> feature/dynamic-model-loader
-
 A high-performance LLM inference server implementing continuous batching, per-request KV-cache management, and Server-Sent Events (SSE) streaming. Designed for production-scale deployment with **2-5x throughput improvements** under concurrent load.
 
 ## 🚀 Key Features

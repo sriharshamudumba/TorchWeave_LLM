@@ -1,10 +1,18 @@
 # TorchWeave LLM: Inference Compiler for LLM Optimization
 
+<<<<<<< HEAD
 ![TorchWeave CI](https://img.shields.io/badge/TorchWeave-CI-brightgreen)
 ![Python 3.12](https://img.shields.io/badge/Python-3.12-blue)
 ![Docker](https://img.shields.io/badge/Docker-Compatible-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Framework-green)
 ![PyTorch](https://img.shields.io/badge/PyTorch-ML-orange)
+=======
+[![TorchWeave CI](https://github.com/sriharshamudumba/TorchWeave_LLM/actions/workflows/ci.yml/badge.svg)](https://github.com/sriharshamudumba/TorchWeave_LLM/actions/workflows/ci.yml)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-312/)
+[![Docker](https://img.shields.io/badge/docker-compose-blue.svg)](https://docs.docker.com/compose/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104-green.svg)](https://fastapi.tiangolo.com/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
+>>>>>>> 71690ab (SSE Token Streaming with real-time token delivery and time-to-first-token)
 
 A high-performance LLM inference server implementing continuous batching, per-request KV-cache management, and Server-Sent Events (SSE) streaming. Designed for production-scale deployment with **2-5x throughput improvements** under concurrent load.
 
@@ -29,11 +37,57 @@ A high-performance LLM inference server implementing continuous batching, per-re
 
 ## 🏗️ Architecture
 
+<<<<<<< HEAD
 The system consists of three main components:
 
 1. **Inference Server**: FastAPI-based server with continuous batching scheduler
 2. **Model Optimizer**: Artifact staging and model preparation service
 3. **Shared Storage**: Container-native artifact management
+=======
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        C1[Client 1]
+        C2[Client 2] 
+        C3[Client N]
+    end
+    
+    subgraph "TorchWeave Server"
+        LB[Load Balancer]
+        API[FastAPI Server]
+        SCH[Continuous Batch Scheduler]
+        RT[Model Runtime]
+        GPU[GPU/CPU Inference]
+        SSE[SSE Streaming]
+    end
+    
+    subgraph "Infrastructure"
+        OPT[Optimizer Sidecar]
+        ART[Artifact Storage]
+    end
+    
+    %% Client to Load Balancer
+    C1 --> LB
+    C2 --> LB
+    C3 --> LB
+    
+    %% Server Flow
+    LB --> API
+    API --> SCH
+    SCH --> RT
+    RT --> GPU
+    API --> SSE
+    
+    %% Infrastructure
+    OPT --> ART
+    ART --> RT
+    
+    %% Streaming back to clients
+    SSE --> C1
+    SSE --> C2
+    SSE --> C3
+```
+>>>>>>> 71690ab (SSE Token Streaming with real-time token delivery and time-to-first-token)
 
 ## 🛠️ Technology Stack
 
@@ -379,4 +433,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
+<<<<<<< HEAD
 **Built by Sri Harsha Mudumba** | *Inference Compiler for LLM Optimization*
+=======
+**Built by Sri Harsha Mudumba** | *Inference Compiler for LLM Optimization*
+>>>>>>> 71690ab (SSE Token Streaming with real-time token delivery and time-to-first-token)

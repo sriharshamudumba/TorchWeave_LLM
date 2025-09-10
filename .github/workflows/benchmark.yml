@@ -1,0 +1,36 @@
+name: Performance Benchmarks
+on: [push, pull_request]
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    services:
+      torchweave:
+        image: python:3.12-slim
+        ports:
+          - 8000:8000
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          
+      - name: Install dependencies
+        run: |
+          pip install httpx torch transformers fastapi uvicorn
+          
+      - name: Start TorchWeave server
+        run: |
+          cd server
+          pip install -r requirements.txt
+          python -m uvicorn src.server:app --host 0.0.0.0 --port 8000 &
+          sleep 30  # Wait for server to start
+          
+      - name: Run health check
+        run: |
+          curl -f http://localhost:8000/health || exit 1
+          
+      - name: Run benchmarks
+        run: |
+          python scripts/bench.py --concurrency 2 --iters 4 --sse http://localhost:8000/v1/generate

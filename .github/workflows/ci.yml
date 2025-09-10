@@ -1,0 +1,34 @@
+name: TorchWeave CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+          
+      - name: Install dependencies
+        run: |
+          cd server
+          pip install -r requirements.txt
+          
+      - name: Lint code
+        run: |
+          pip install flake8
+          flake8 server/src/ --count --select=E9,F63,F7,F82 --show-source --statistics
+          
+      - name: Test imports
+        run: |
+          cd server
+          python -c "from src.model_runtime import ModelRuntime; print('ModelRuntime import OK')"
+          python -c "from src.scheduler import ContinuousBatchScheduler; print('Scheduler import OK')"
+          python -c "from src.server import app; print('FastAPI app import OK')"
+          
+      - name: Validate Docker setup
+        run: |
+          docker --version
+          docker compose config

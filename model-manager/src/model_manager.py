@@ -1,0 +1,649 @@
+"""
+Model Manager Service - Handles dynamic model loading from HuggingFace and API endpoints
+Optimized for static HTML frontend
+File: model-manager/src/model_manager.py
+"""
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, List, Any
+import os
+import json
+import asyncio
+import aiohttp
+import logging
+from pathlib import Path
+import shutil
+from datetime import datetime
+import hashlib
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
+import torch
+import requests
+from enum import Enum
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(
+    title="TorchWeave Model Manager", 
+    version="1.0.0",
+    description="Model Manager API for static HTML frontend"
+)
+
+# Enhanced CORS middleware for static HTML
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for static HTML
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["*"]
+)
+
+# Configuration
+ARTIFACTS_DIR = Path(os.getenv("ARTIFACTS_DIR", "/artifacts"))
+MODEL_CACHE_DIR = Path(os.getenv("MODEL_CACHE_DIR", "/model_cache"))
+HUGGINGFACE_CACHE_DIR = Path(os.getenv("HUGGINGFACE_CACHE_DIR", "/model_cache/huggingface"))
+SERVER_URL = os.getenv("SERVER_URL", "http://server:8000")
+
+# Ensure directories exist
+ARTIFACTS_DIR.mkdir(exist_ok=True, parents=True)
+MODEL_CACHE_DIR.mkdir(exist_ok=True, parents=True)
+HUGGINGFACE_CACHE_DIR.mkdir(exist_ok=True, parents=True)
+
+class ModelSource(str, Enum):
+    HUGGINGFACE = "huggingface"
+    API = "api"
+    LOCAL = "local"
+
+class ModelStatus(str, Enum):
+    AVAILABLE = "available"
+    LOADING = "loading"
+    ERROR = "error"
+    NOT_FOUND = "not_found"
+
+class ModelConfig(BaseModel):
+    model_id: str
+    source: ModelSource
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    api_endpoint: Optional[str] = None
+    api_key: Optional[str] = None
+    parameters: Optional[Dict[str, Any]] = {}
+    tags: Optional[List[str]] = []
+
+class ModelInfo(BaseModel):
+    model_id: str
+    source: ModelSource
+    display_name: str
+    description: str
+    status: ModelStatus
+    size_mb: Optional[float] = None
+    parameters: Optional[Dict[str, Any]] = {}
+    tags: List[str] = []
+    created_at: datetime
+    last_used: Optional[datetime] = None
+    error_message: Optional[str] = None
+    progress: Optional[float] = None  # For loading progress
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
+class LoadModelRequest(BaseModel):
+    model_config: ModelConfig
+    force_reload: bool = False
+
+class ModelListResponse(BaseModel):
+    models: List[ModelInfo]
+    total: int
+    cached_models: int
+    loading_models: int
+
+class ApiResponse(BaseModel):
+    success: bool
+    message: str
+    data: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+# Global model registry
+model_registry: Dict[str, ModelInfo] = {}
+loading_models: Dict[str, Dict[str, Any]] = {}  # Store loading progress
+
+# Load existing model registry
+def load_model_registry():
+    global model_registry
+    registry_file = MODEL_CACHE_DIR / "model_registry.json"
+    if registry_file.exists():
+        try:
+            with open(registry_file, 'r') as f:
+                data = json.load(f)
+                for model_id, model_info in data.items():
+                    # Convert datetime strings back to datetime objects
+                    if 'created_at' in model_info:
+                        model_info['created_at'] = datetime.fromisoformat(model_info['created_at'].replace('Z', '+00:00'))
+                    if 'last_used' in model_info and model_info['last_used']:
+                        model_info['last_used'] = datetime.fromisoformat(model_info['last_used'].replace('Z', '+00:00'))
+                    model_registry[model_id] = ModelInfo(**model_info)
+                logger.info(f"Loaded {len(model_registry)} models from registry")
+        except Exception as e:
+            logger.error(f"Failed to load model registry: {e}")
+
+def save_model_registry():
+    """Save model registry to disk"""
+    registry_file = MODEL_CACHE_DIR / "model_registry.json"
+    try:
+        data = {}
+        for model_id, model_info in model_registry.items():
+            data[model_id] = model_info.dict()
+        with open(registry_file, 'w') as f:
+            json.dump(data, f, indent=2, default=str)
+    except Exception as e:
+        logger.error(f"Failed to save model registry: {e}")
+
+async def get_model_size(model_path: Path) -> float:
+    """Calculate model size in MB"""
+    try:
+        total_size = 0
+        for file_path in model_path.rglob("*"):
+            if file_path.is_file():
+                total_size += file_path.stat().st_size
+        return total_size / (1024 * 1024)  # Convert to MB
+    except Exception:
+        return 0.0
+
+def update_loading_progress(model_id: str, progress: float, message: str = ""):
+    """Update loading progress for a model"""
+    if model_id in loading_models:
+        loading_models[model_id]['progress'] = progress
+        loading_models[model_id]['message'] = message
+        loading_models[model_id]['updated_at'] = datetime.now()
+
+async def load_huggingface_model(model_config: ModelConfig) -> ModelInfo:
+    """Load a model from HuggingFace Hub with progress tracking"""
+    model_id = model_config.model_id
+    model_path = HUGGINGFACE_CACHE_DIR / model_id.replace("/", "_")
+    
+    try:
+        logger.info(f"Loading HuggingFace model: {model_id}")
+        update_loading_progress(model_id, 10, "Checking model configuration...")
+        
+        # Check if model exists on HuggingFace Hub
+        try:
+            config = AutoConfig.from_pretrained(model_id)
+            model_info = ModelInfo(
+                model_id=model_id,
+                source=ModelSource.HUGGINGFACE,
+                display_name=model_config.display_name or model_id,
+                description=model_config.description or f"HuggingFace model: {model_id}",
+                status=ModelStatus.LOADING,
+                parameters=model_config.parameters,
+                tags=model_config.tags or [],
+                created_at=datetime.now(),
+                progress=10
+            )
+            model_registry[model_id] = model_info  # Update registry with loading status
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"Model not found on HuggingFace Hub: {e}")
+        
+        update_loading_progress(model_id, 25, "Creating model directory...")
+        model_path.mkdir(exist_ok=True, parents=True)
+        
+        update_loading_progress(model_id, 40, "Downloading tokenizer...")
+        # Download tokenizer
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_id,
+            cache_dir=str(model_path),
+            trust_remote_code=True
+        )
+        
+        update_loading_progress(model_id, 70, "Downloading model weights...")
+        # Download model
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            cache_dir=str(model_path),
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            device_map="auto" if torch.cuda.is_available() else None,
+            trust_remote_code=True,
+            low_cpu_mem_usage=True
+        )
+        
+        update_loading_progress(model_id, 85, "Saving model locally...")
+        # Save model locally
+        model.save_pretrained(model_path)
+        tokenizer.save_pretrained(model_path)
+        
+        update_loading_progress(model_id, 95, "Copying to artifacts...")
+        # Copy to artifacts directory for server
+        artifacts_model_path = ARTIFACTS_DIR / "model"
+        if artifacts_model_path.exists():
+            shutil.rmtree(artifacts_model_path)
+        shutil.copytree(model_path, artifacts_model_path)
+        
+        # Update model info
+        model_info.status = ModelStatus.AVAILABLE
+        model_info.size_mb = await get_model_size(model_path)
+        model_info.progress = 100
+        
+        update_loading_progress(model_id, 100, "Model loaded successfully!")
+        logger.info(f"Successfully loaded HuggingFace model: {model_id}")
+        return model_info
+        
+    except Exception as e:
+        error_msg = f"Failed to load HuggingFace model {model_id}: {str(e)}"
+        logger.error(error_msg)
+        
+        model_info = ModelInfo(
+            model_id=model_id,
+            source=ModelSource.HUGGINGFACE,
+            display_name=model_config.display_name or model_id,
+            description=model_config.description or f"HuggingFace model: {model_id}",
+            status=ModelStatus.ERROR,
+            parameters=model_config.parameters,
+            tags=model_config.tags or [],
+            created_at=datetime.now(),
+            error_message=error_msg
+        )
+        return model_info
+
+async def setup_api_model(model_config: ModelConfig) -> ModelInfo:
+    """Setup API model configuration"""
+    model_id = model_config.model_id
+    
+    try:
+        logger.info(f"Setting up API model: {model_id}")
+        update_loading_progress(model_id, 25, "Validating API configuration...")
+        
+        # Validate API endpoint
+        if not model_config.api_endpoint:
+            raise ValueError("API endpoint is required for API models")
+        
+        update_loading_progress(model_id, 50, "Testing API connection...")
+        # Test API connection
+        async with aiohttp.ClientSession() as session:
+            headers = {}
+            if model_config.api_key:
+                headers["Authorization"] = f"Bearer {model_config.api_key}"
+            
+            # Simple health check
+            try:
+                health_url = model_config.api_endpoint
+                if "/health" not in health_url:
+                    health_url += "/health" if health_url.endswith("/") else "/health"
+                
+                async with session.get(health_url, headers=headers, timeout=10) as response:
+                    if response.status != 200:
+                        logger.warning(f"API health check returned {response.status}")
+            except Exception as e:
+                logger.warning(f"API health check failed: {e}")
+        
+        update_loading_progress(model_id, 90, "Finalizing API model setup...")
+        
+        model_info = ModelInfo(
+            model_id=model_id,
+            source=ModelSource.API,
+            display_name=model_config.display_name or model_id,
+            description=model_config.description or f"API model: {model_id}",
+            status=ModelStatus.AVAILABLE,
+            parameters={
+                **model_config.parameters,
+                "api_endpoint": model_config.api_endpoint,
+                "api_key": model_config.api_key if model_config.api_key else None
+            },
+            tags=model_config.tags or ["api"],
+            created_at=datetime.now(),
+            progress=100
+        )
+        
+        update_loading_progress(model_id, 100, "API model ready!")
+        logger.info(f"Successfully setup API model: {model_id}")
+        return model_info
+        
+    except Exception as e:
+        error_msg = f"Failed to setup API model {model_id}: {str(e)}"
+        logger.error(error_msg)
+        
+        model_info = ModelInfo(
+            model_id=model_id,
+            source=ModelSource.API,
+            display_name=model_config.display_name or model_id,
+            description=model_config.description or f"API model: {model_id}",
+            status=ModelStatus.ERROR,
+            parameters=model_config.parameters,
+            tags=model_config.tags or ["api"],
+            created_at=datetime.now(),
+            error_message=error_msg
+        )
+        return model_info
+
+async def notify_server_model_change(model_id: str):
+    """Notify the inference server about model changes"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{SERVER_URL}/model/reload",
+                json={"model_id": model_id},
+                timeout=30
+            ) as response:
+                if response.status == 200:
+                    logger.info(f"Successfully notified server about model change: {model_id}")
+                else:
+                    logger.warning(f"Server notification returned {response.status}")
+    except Exception as e:
+        logger.error(f"Failed to notify server about model change: {e}")
+
+# Enhanced error handling for static HTML
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "error": exc.detail,
+            "status_code": exc.status_code
+        }
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": "Internal server error",
+            "status_code": 500
+        }
+    )
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize model registry on startup"""
+    load_model_registry()
+    logger.info(f"Model Manager started. Loaded {len(model_registry)} models from registry.")
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "success": True,
+        "message": "Model Manager is healthy",
+        "data": {
+            "status": "healthy",
+            "models_loaded": len(model_registry),
+            "models_loading": len(loading_models),
+            "timestamp": datetime.now().isoformat()
+        }
+    }
+
+@app.get("/models", response_model=ApiResponse)
+async def list_models():
+    """List all available models with enhanced response format"""
+    models = list(model_registry.values())
+    loading_count = len([m for m in models if m.status == ModelStatus.LOADING])
+    cached_models = len([m for m in models if m.status == ModelStatus.AVAILABLE])
+    
+    response_data = ModelListResponse(
+        models=models,
+        total=len(models),
+        cached_models=cached_models,
+        loading_models=loading_count
+    )
+    
+    return ApiResponse(
+        success=True,
+        message=f"Retrieved {len(models)} models",
+        data=response_data.dict()
+    )
+
+@app.get("/models/{model_id}")
+async def get_model(model_id: str):
+    """Get specific model information"""
+    if model_id not in model_registry:
+        return ApiResponse(
+            success=False,
+            error="Model not found",
+            data={"model_id": model_id}
+        )
+    
+    model_info = model_registry[model_id]
+    
+    # Add loading progress if available
+    if model_id in loading_models:
+        model_info.progress = loading_models[model_id].get('progress', 0)
+    
+    return ApiResponse(
+        success=True,
+        message=f"Retrieved model {model_id}",
+        data=model_info.dict()
+    )
+
+@app.get("/models/{model_id}/progress")
+async def get_model_progress(model_id: str):
+    """Get loading progress for a specific model"""
+    if model_id in loading_models:
+        progress_data = loading_models[model_id]
+        return ApiResponse(
+            success=True,
+            message="Progress retrieved",
+            data={
+                "model_id": model_id,
+                "progress": progress_data.get('progress', 0),
+                "message": progress_data.get('message', ''),
+                "updated_at": progress_data.get('updated_at', datetime.now()).isoformat()
+            }
+        )
+    
+    # Check if model is in registry
+    if model_id in model_registry:
+        model = model_registry[model_id]
+        return ApiResponse(
+            success=True,
+            message="Model status retrieved",
+            data={
+                "model_id": model_id,
+                "progress": 100 if model.status == ModelStatus.AVAILABLE else 0,
+                "message": f"Model is {model.status.value}",
+                "status": model.status.value
+            }
+        )
+    
+    return ApiResponse(
+        success=False,
+        error="Model not found",
+        data={"model_id": model_id}
+    )
+
+@app.post("/models/load")
+async def load_model(request: LoadModelRequest, background_tasks: BackgroundTasks):
+    """Load a new model"""
+    model_id = request.model_config.model_id
+    
+    # Check if model is already loading
+    if model_id in loading_models:
+        return ApiResponse(
+            success=True,
+            message=f"Model {model_id} is already being loaded",
+            data={"status": "loading", "model_id": model_id}
+        )
+    
+    # Check if model exists and force_reload is False
+    if model_id in model_registry and not request.force_reload:
+        if model_registry[model_id].status == ModelStatus.AVAILABLE:
+            return ApiResponse(
+                success=True,
+                message=f"Model {model_id} is already loaded",
+                data={"status": "available", "model_id": model_id}
+            )
+    
+    # Initialize loading tracking
+    loading_models[model_id] = {
+        'progress': 0,
+        'message': 'Starting model load...',
+        'started_at': datetime.now(),
+        'updated_at': datetime.now()
+    }
+    
+    # Start loading in background
+    background_tasks.add_task(load_model_background, request.model_config)
+    
+    return ApiResponse(
+        success=True,
+        message=f"Started loading model {model_id}",
+        data={"status": "loading", "model_id": model_id}
+    )
+
+async def load_model_background(model_config: ModelConfig):
+    """Background task to load model"""
+    model_id = model_config.model_id
+    
+    try:
+        if model_config.source == ModelSource.HUGGINGFACE:
+            model_info = await load_huggingface_model(model_config)
+        elif model_config.source == ModelSource.API:
+            model_info = await setup_api_model(model_config)
+        else:
+            raise ValueError(f"Unsupported model source: {model_config.source}")
+        
+        # Update registry
+        model_registry[model_id] = model_info
+        save_model_registry()
+        
+        # Notify server if model loaded successfully
+        if model_info.status == ModelStatus.AVAILABLE:
+            await notify_server_model_change(model_id)
+        
+    except Exception as e:
+        logger.error(f"Failed to load model {model_id}: {e}")
+        model_registry[model_id] = ModelInfo(
+            model_id=model_id,
+            source=model_config.source,
+            display_name=model_config.display_name or model_id,
+            description=model_config.description or "",
+            status=ModelStatus.ERROR,
+            parameters=model_config.parameters,
+            tags=model_config.tags or [],
+            created_at=datetime.now(),
+            error_message=str(e)
+        )
+        save_model_registry()
+    
+    finally:
+        # Clean up loading tracking
+        if model_id in loading_models:
+            del loading_models[model_id]
+
+@app.delete("/models/{model_id}")
+async def delete_model(model_id: str):
+    """Delete a model from registry and cache"""
+    if model_id not in model_registry:
+        return ApiResponse(
+            success=False,
+            error="Model not found",
+            data={"model_id": model_id}
+        )
+    
+    try:
+        # Remove from cache
+        model_path = HUGGINGFACE_CACHE_DIR / model_id.replace("/", "_")
+        if model_path.exists():
+            shutil.rmtree(model_path)
+        
+        # Remove from registry
+        del model_registry[model_id]
+        save_model_registry()
+        
+        logger.info(f"Successfully deleted model: {model_id}")
+        return ApiResponse(
+            success=True,
+            message=f"Model {model_id} deleted successfully",
+            data={"model_id": model_id}
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to delete model {model_id}: {e}")
+        return ApiResponse(
+            success=False,
+            error=f"Failed to delete model: {e}",
+            data={"model_id": model_id}
+        )
+
+@app.get("/models/search/{query}")
+async def search_models(query: str, limit: int = 10):
+    """Search for models on HuggingFace Hub"""
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi()
+        
+        models = api.list_models(
+            search=query,
+            limit=limit,
+            sort="downloads",
+            direction=-1,
+            task="text-generation"
+        )
+        
+        results = []
+        for model in models:
+            results.append({
+                "id": model.id,
+                "display_name": model.id,
+                "description": f"Downloads: {model.downloads or 0}",
+                "tags": model.tags or [],
+                "source": "huggingface",
+                "downloads": model.downloads or 0
+            })
+        
+        return ApiResponse(
+            success=True,
+            message=f"Found {len(results)} models for query: {query}",
+            data={"results": results, "query": query}
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to search models: {e}")
+        return ApiResponse(
+            success=False,
+            error=f"Failed to search models: {e}",
+            data={"query": query}
+        )
+
+# Additional endpoint for static HTML to get system status
+@app.get("/status")
+async def get_status():
+    """Get comprehensive system status"""
+    models = list(model_registry.values())
+    
+    status_data = {
+        "system": {
+            "healthy": True,
+            "timestamp": datetime.now().isoformat(),
+            "uptime": "running"
+        },
+        "models": {
+            "total": len(models),
+            "available": len([m for m in models if m.status == ModelStatus.AVAILABLE]),
+            "loading": len([m for m in models if m.status == ModelStatus.LOADING]),
+            "error": len([m for m in models if m.status == ModelStatus.ERROR])
+        },
+        "storage": {
+            "artifacts_dir": str(ARTIFACTS_DIR),
+            "model_cache_dir": str(MODEL_CACHE_DIR),
+            "huggingface_cache_dir": str(HUGGINGFACE_CACHE_DIR)
+        }
+    }
+    
+    return ApiResponse(
+        success=True,
+        message="System status retrieved",
+        data=status_data
+    )
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)

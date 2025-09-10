@@ -1,6 +1,7 @@
 # TorchWeave LLM: Inference Compiler for LLM Optimization
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 <<<<<<< HEAD
 ![TorchWeave CI](https://img.shields.io/badge/TorchWeave-CI-brightgreen)
@@ -11,6 +12,9 @@
 =======
 >>>>>>> feature/dynamic-model-loader
 [![TorchWeave CI](https://github.com/sriharshamudumba/TorchWeave_LLM/actions/workflows/ci.yml/badge.svg)](https://github.com/sriharshamudumba/TorchWeave_LLM/actions/workflows/ci.yml)
+=======
+
+>>>>>>> fe75b7316efd929d057922051f770f071b313933
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-312/)
 [![Docker](https://img.shields.io/badge/docker-compose-blue.svg)](https://docs.docker.com/compose/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104-green.svg)](https://fastapi.tiangolo.com/)
@@ -446,6 +450,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 **Built by Sri Harsha Mudumba** | *Inference Compiler for LLM Optimization*
 =======
 <<<<<<< HEAD
@@ -454,3 +459,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **Built by Sri Harsha Mudumba** | *Inference Compiler for LLM Optimization*
 >>>>>>> 71690ab (SSE Token Streaming with real-time token delivery and time-to-first-token)
 >>>>>>> feature/dynamic-model-loader
+=======
+**Built by Sri Harsha Mudumba** | *Inference Compiler for LLM Optimization*
+>>>>>>> fe75b7316efd929d057922051f770f071b313933

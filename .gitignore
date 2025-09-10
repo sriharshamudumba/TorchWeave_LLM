@@ -7,3 +7,4 @@ artifacts/
 .env.example
 llm_env
 llm_env/
+.env.example

@@ -80,33 +80,45 @@ services:
     volumes:
       - artifacts:/artifacts
 
-  # Enhanced UI service using your existing ui directory
+  # Model management service - now in default profile
+  model-manager:
+    build:
+      context: ./model-manager
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"  # Expose port for external access
+    environment:
+      - ARTIFACT_DIR=/artifacts
+      - ARTIFACT_MODEL_DIR=/artifacts/model
+      - MODEL_CACHE_DIR=/model_cache
+      - HUGGINGFACE_CACHE_DIR=/model_cache/huggingface
+      - SERVER_URL=http://server-cpu:8000  # Connect to inference server
+    volumes:
+      - artifacts:/artifacts
+      - model-cache:/model_cache  # Persistent model cache
+    depends_on:
+      - server-cpu
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Enhanced UI service
   ui:
     build:
       context: ./ui
       dockerfile: Dockerfile
     ports:
-      - "3000:80"  # Back to port 3000
+      - "3000:80"
     environment:
       - NGINX_HOST=localhost
       - NGINX_PORT=80
     depends_on:
       - server-cpu
+      - model-manager
     profiles:
       - ui
-
-  # Model management service
-  model-manager:
-    build:
-      context: ./model-manager
-      dockerfile: Dockerfile
-    environment:
-      - ARTIFACT_DIR=/artifacts
-      - ARTIFACT_MODEL_DIR=/artifacts/model
-    volumes:
-      - artifacts:/artifacts
-    profiles:
-      - manager
 
   # Enhanced monitoring and metrics
   prometheus:
@@ -147,5 +159,6 @@ services:
 
 volumes:
   artifacts:
+  model-cache:  # Add persistent model cache
   grafana-data:
   redis-data:

@@ -1,27 +1,9 @@
-# FastAPI and web framework dependencies
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-pydantic==2.5.0
-
-# HTTP client and CORS
-aiohttp==3.9.1
-python-multipart==0.0.6
-
-# Machine Learning and HuggingFace dependencies
-torch>=2.0.0
-transformers>=4.35.0
-huggingface-hub>=0.19.0
-accelerate>=0.24.0
-
-# Utility libraries
+pydantic==2.4.2
+aiohttp==3.9.0
+transformers==4.36.0
+torch==2.1.0
+huggingface-hub==0.19.4
 requests==2.31.0
-pathlib2==2.3.7
-
-# Optional: Additional ML libraries (uncomment if needed)
-# tokenizers>=0.14.0
-# sentencepiece>=0.1.99
-# protobuf>=4.21.0
-
-# Development dependencies (optional)
-# pytest==7.4.3
-# pytest-asyncio==0.21.1
+python-multipart==0.0.6

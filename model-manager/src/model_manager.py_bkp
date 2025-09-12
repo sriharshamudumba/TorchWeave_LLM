@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, List, Any
 import os
 import json
@@ -67,8 +67,6 @@ class ModelStatus(str, Enum):
     NOT_FOUND = "not_found"
 
 class ModelConfig(BaseModel):
-    model_config = ConfigDict(protected_namespaces=())  # Fix Pydantic warning
-    
     model_id: str
     source: ModelSource
     display_name: Optional[str] = None
@@ -79,8 +77,6 @@ class ModelConfig(BaseModel):
     tags: Optional[List[str]] = []
 
 class ModelInfo(BaseModel):
-    model_config = ConfigDict(protected_namespaces=())  # Fix Pydantic warning
-    
     model_id: str
     source: ModelSource
     display_name: str
@@ -93,6 +89,11 @@ class ModelInfo(BaseModel):
     last_used: Optional[datetime] = None
     error_message: Optional[str] = None
     progress: Optional[float] = None  # For loading progress
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
 
 class LoadModelRequest(BaseModel):
     model_config: ModelConfig
@@ -139,7 +140,7 @@ def save_model_registry():
     try:
         data = {}
         for model_id, model_info in model_registry.items():
-            data[model_id] = model_info.model_dump()
+            data[model_id] = model_info.dict()
         with open(registry_file, 'w') as f:
             json.dump(data, f, indent=2, default=str)
     except Exception as e:
@@ -397,7 +398,7 @@ async def list_models():
     return ApiResponse(
         success=True,
         message=f"Retrieved {len(models)} models",
-        data=response_data.model_dump()
+        data=response_data.dict()
     )
 
 @app.get("/models/{model_id}")
@@ -419,7 +420,7 @@ async def get_model(model_id: str):
     return ApiResponse(
         success=True,
         message=f"Retrieved model {model_id}",
-        data=model_info.model_dump()
+        data=model_info.dict()
     )
 
 @app.get("/models/{model_id}/progress")
@@ -461,9 +462,7 @@ async def get_model_progress(model_id: str):
 @app.post("/models/load")
 async def load_model(request: LoadModelRequest, background_tasks: BackgroundTasks):
     """Load a new model"""
-    # Fix: Access model_config correctly
-    model_config = request.model_config
-    model_id = model_config.model_id
+    model_id = request.model_config.model_id
     
     # Check if model is already loading
     if model_id in loading_models:
@@ -491,7 +490,7 @@ async def load_model(request: LoadModelRequest, background_tasks: BackgroundTask
     }
     
     # Start loading in background
-    background_tasks.add_task(load_model_background, model_config)
+    background_tasks.add_task(load_model_background, request.model_config)
     
     return ApiResponse(
         success=True,
@@ -653,9 +652,9 @@ if __name__ == "__main__":
     
     # Start the server
     uvicorn.run(
-        app,
+        "src.model_manager:app",  # Updated module path
         host="0.0.0.0", 
         port=8001,
-        reload=False,
+        reload=False,  # Disable reload in production
         log_level="info"
     )

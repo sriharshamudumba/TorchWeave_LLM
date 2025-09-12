@@ -67,6 +67,32 @@ class ModelRuntime:
         """Decode a single token ID to text"""
         return self.tokenizer.decode([token_id], skip_special_tokens=skip_special_tokens)
     
+    def generate_batch(self, input_ids, attention_mask, max_new_tokens=50, temperature=0.7):
+        """Generate for a batch of inputs"""
+        try:
+            outputs = self.model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                do_sample=temperature > 0,
+                pad_token_id=self.tokenizer.eos_token_id
+            )
+            
+            # Decode each output in the batch
+            batch_results = []
+            for i in range(outputs.shape[0]):
+                # Remove input tokens to get only generated text
+                generated_tokens = outputs[i][input_ids.shape[1]:]
+                decoded = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
+                batch_results.append(decoded)
+                
+            return batch_results
+            
+        except Exception as e:
+            self.logger.error(f"Batch generation failed: {e}")
+            raise
+        
     def generate_single(self, 
                        prompt: str,
                        max_new_tokens: int = 128,

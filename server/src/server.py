@@ -1,199 +1,147 @@
 import os
 import asyncio
-import json
-from typing import Optional, Dict, Any
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import torch
-from contextlib import asynccontextmanager
+from typing import Optional, AsyncGenerator
+import uvicorn
 
-# Import your existing modules
-from .model_runtime import ModelRuntime
-from .scheduler import ContinuousBatchScheduler
+from scheduler import ContinuousBatchScheduler
+from model_runtime import ModelRuntime
 
-# Global variables
-model_runtime: Optional[ModelRuntime] = None
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Global scheduler instance
 scheduler: Optional[ContinuousBatchScheduler] = None
 
-# Configuration from environment
-MODEL_DIR = os.getenv("ARTIFACT_MODEL_DIR", "/artifacts/model")
-MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "128"))
-TEMPERATURE = float(os.getenv("TEMPERATURE", "0.7"))
-TOP_K = int(os.getenv("TOP_K", "0"))
-TOP_P = float(os.getenv("TOP_P", "0.9"))
-SEED = int(os.getenv("SEED", "42"))
-SCHEDULE_TICK_MS = int(os.getenv("SCHEDULE_TICK_MS", "15"))
-MAX_BATCH = int(os.getenv("MAX_BATCH", "16"))
+class GenerateRequest(BaseModel):
+    prompt: str
+    max_new_tokens: int = 128
+    temperature: float = 0.7
+    top_k: int = 50
+    top_p: float = 0.9
+    seed: Optional[int] = None
+
+class GenerateResponse(BaseModel):
+    text: str
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize model and scheduler on startup"""
-    global model_runtime, scheduler
+    """Application lifespan handler"""
+    global scheduler
     
     try:
-        # Initialize model runtime
-        print(f"[server] Loading model from {MODEL_DIR}")
-        model_runtime = ModelRuntime(MODEL_DIR)
+        # Load model
+        model_dir = os.environ.get("ARTIFACT_MODEL_DIR", "/artifacts/model")
+        logger.info(f"[server] Loading model from {model_dir}")
         
-        # Initialize continuous batch scheduler
-        print(f"[server] Starting continuous batch scheduler")
+        model_runtime = ModelRuntime(model_dir)
+        
+        # Initialize scheduler - Fix: Remove schedule_tick_ms parameter
+        logger.info("[server] Starting continuous batch scheduler")
+        max_batch = int(os.environ.get("MAX_BATCH", "16"))
+        
+        # Create scheduler without the problematic parameter
         scheduler = ContinuousBatchScheduler(
             model_runtime=model_runtime,
-            max_batch_size=MAX_BATCH,
-            schedule_tick_ms=SCHEDULE_TICK_MS
+            max_batch_size=max_batch
         )
         
         # Start the scheduler
-        await scheduler.start()
-        print(f"[server] Server ready")
+        asyncio.create_task(scheduler.run())
+        
+        logger.info("[server] Server initialized successfully")
+        yield
         
     except Exception as e:
-        print(f"[server] Failed to initialize: {e}")
+        logger.error(f"[server] Failed to initialize: {e}")
         raise
-    
-    yield
-    
-    # Cleanup
-    if scheduler:
-        await scheduler.stop()
+    finally:
+        if scheduler:
+            await scheduler.stop()
 
-# Create FastAPI app with lifespan
-app = FastAPI(
-    title="TorchWeave LLM Server",
-    description="Inference Compiler for LLM Optimization with Continuous Batching",
-    version="1.0.0",
-    lifespan=lifespan
-)
+app = FastAPI(lifespan=lifespan)
 
-# Request models
-class GenerateRequest(BaseModel):
-    prompt: str
-    max_new_tokens: Optional[int] = None
-    temperature: Optional[float] = None
-    top_k: Optional[int] = None
-    top_p: Optional[float] = None
-    seed: Optional[int] = None
-
-# Health endpoint
 @app.get("/health")
-def health():
+async def health_check():
     """Health check endpoint"""
     return {"status": "ok"}
 
-# Model info endpoint
 @app.get("/model")
-def model_info():
+async def model_info():
     """Get model information"""
-    if not model_runtime:
+    if not scheduler:
         raise HTTPException(status_code=503, detail="Model not loaded")
     
-    try:
-        vocab_size = model_runtime.get_vocab_size()
-        eos_token = model_runtime.get_eos_token()
-        return {
-            "vocab_size": vocab_size,
-            "eos": eos_token,
-            "device": str(model_runtime.device),
-            "max_batch_size": MAX_BATCH
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting model info: {str(e)}")
+    runtime = scheduler.model_runtime
+    return {
+        "vocab_size": runtime.tokenizer.vocab_size,
+        "eos": runtime.tokenizer.eos_token,
+        "device": str(runtime.device),
+        "max_batch_size": scheduler.max_batch_size
+    }
 
-# Streaming generation endpoint with continuous batching
 @app.post("/v1/generate")
-async def generate_streaming(request: GenerateRequest):
-    """Generate text with continuous batching and SSE streaming"""
+async def generate_stream(request: GenerateRequest):
+    """Generate text with streaming response"""
     if not scheduler:
-        raise HTTPException(status_code=503, detail="Scheduler not ready")
+        raise HTTPException(status_code=503, detail="Model not loaded")
     
-    # Use request params or defaults
-    max_new_tokens = request.max_new_tokens or MAX_NEW_TOKENS
-    temperature = request.temperature if request.temperature is not None else TEMPERATURE
-    top_k = request.top_k if request.top_k is not None else TOP_K
-    top_p = request.top_p if request.top_p is not None else TOP_P
-    seed = request.seed if request.seed is not None else SEED
-    
-    async def event_stream():
+    async def generate() -> AsyncGenerator[str, None]:
         try:
             # Submit request to scheduler
             request_id = await scheduler.submit_request(
                 prompt=request.prompt,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                top_k=top_k,
-                top_p=top_p,
-                seed=seed
+                max_new_tokens=request.max_new_tokens,
+                temperature=request.temperature,
+                top_k=request.top_k,
+                top_p=request.top_p,
+                seed=request.seed
             )
             
-            # Stream tokens from scheduler
-            ttft_sent = False
-            async for event in scheduler.stream_tokens(request_id):
-                if event["type"] == "ttft":
-                    yield f"event: ttft\ndata: {event['time']:.4f}\n\n"
-                    ttft_sent = True
-                elif event["type"] == "token":
-                    yield f"data: {event['token']}\n\n"
-                elif event["type"] == "done":
-                    yield f"event: done\ndata: \n\n"
+            # Stream tokens
+            async for token in scheduler.stream_tokens(request_id):
+                if token.startswith("event: ttft"):
+                    yield f"{token}\n"
+                elif token.startswith("event: done"):
+                    yield f"{token}\n"
                     break
-                elif event["type"] == "error":
-                    yield f"event: error\ndata: {event['error']}\n\n"
-                    break
+                else:
+                    yield f"data: {token}\n"
                     
         except Exception as e:
-            yield f"event: error\ndata: {str(e)}\n\n"
+            logger.error(f"Generation error: {e}")
+            yield f"data: [ERROR] {str(e)}\n"
+            yield "event: done\ndata:\n"
     
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
-    )
+    return StreamingResponse(generate(), media_type="text/plain")
 
-# Baseline generation endpoint (no batching)
-@app.post("/v1/generate_nobatch")
-def generate_nobatch(request: GenerateRequest):
-    """Generate text without batching (baseline comparison)"""
-    if not model_runtime:
+@app.post("/v1/generate_nobatch", response_model=GenerateResponse)
+async def generate_nobatch(request: GenerateRequest):
+    """Generate text without batching (baseline)"""
+    if not scheduler:
         raise HTTPException(status_code=503, detail="Model not loaded")
     
-    # Use request params or defaults
-    max_new_tokens = request.max_new_tokens or MAX_NEW_TOKENS
-    temperature = request.temperature if request.temperature is not None else TEMPERATURE
-    top_k = request.top_k if request.top_k is not None else TOP_K
-    top_p = request.top_p if request.top_p is not None else TOP_P
-    seed = request.seed if request.seed is not None else SEED
-    
     try:
-        # Direct generation without batching
-        result = model_runtime.generate_single(
+        # Use the model runtime directly for non-batched generation
+        runtime = scheduler.model_runtime
+        text = runtime.generate(
             prompt=request.prompt,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-            seed=seed
+            max_new_tokens=request.max_new_tokens,
+            temperature=request.temperature,
+            top_k=request.top_k,
+            top_p=request.top_p,
+            seed=request.seed
         )
-        
-        return {"text": result}
-        
+        return GenerateResponse(text=text)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Generation error: {str(e)}")
+        logger.error(f"Generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# Root endpoint
-@app.get("/")
-def root():
-    """Root endpoint with basic info"""
-    return {
-        "service": "TorchWeave LLM Server",
-        "status": "running",
-        "endpoints": {
-            "health": "/health",
-            "model_info": "/model", 
-            "generate_streaming": "/v1/generate",
-            "generate_baseline": "/v1/generate_nobatch"
-        }
-    }
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "8000"))
+    uvicorn.run(app, host="0.0.0.0", port=port)

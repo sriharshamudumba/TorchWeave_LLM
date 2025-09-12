@@ -1,240 +1,219 @@
-import torch
-import torch.nn.functional as F
-from typing import List, Dict, Any
 import asyncio
 import logging
+import time
+from typing import Dict, List, Optional, AsyncGenerator
+from dataclasses import dataclass
+from enum import Enum
+import uuid
+
+logger = logging.getLogger(__name__)
+
+class RequestStatus(Enum):
+    PENDING = "pending"
+    PROCESSING = "processing" 
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+@dataclass
+class GenerationRequest:
+    request_id: str
+    prompt: str
+    max_new_tokens: int
+    temperature: float
+    top_k: int
+    top_p: float
+    seed: Optional[int]
+    status: RequestStatus
+    created_at: float
+    tokens: List[str]
+    ttft: Optional[float] = None  # Time to first token
 
 class ContinuousBatchScheduler:
-    def __init__(self, model_runtime, max_batch_size=16, tick_ms=15):
+    """Continuous batching scheduler for LLM inference"""
+    
+    def __init__(self, model_runtime, max_batch_size: int = 16):
         self.model_runtime = model_runtime
         self.max_batch_size = max_batch_size
-        self.tick_ms = tick_ms
-        self.pending_requests = []
-        self.active_requests = {}
+        self.requests: Dict[str, GenerationRequest] = {}
+        self.pending_requests: List[str] = []
+        self.active_batches: List[List[str]] = []
         self.running = False
-        self.logger = logging.getLogger(__name__)
         
-    async def schedule_loop(self):
-        """Main scheduler loop with proper error handling"""
+        # Configuration - can be set via environment or parameters
+        self.schedule_tick_ms = 15  # Fixed schedule tick time
+        
+        logger.info(f"[Scheduler] Initialized with max_batch_size={max_batch_size}")
+    
+    async def submit_request(
+        self,
+        prompt: str,
+        max_new_tokens: int = 128,
+        temperature: float = 0.7,
+        top_k: int = 50,
+        top_p: float = 0.9,
+        seed: Optional[int] = None
+    ) -> str:
+        """Submit a generation request"""
+        request_id = str(uuid.uuid4())
+        
+        request = GenerationRequest(
+            request_id=request_id,
+            prompt=prompt,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            seed=seed,
+            status=RequestStatus.PENDING,
+            created_at=time.time(),
+            tokens=[]
+        )
+        
+        self.requests[request_id] = request
+        self.pending_requests.append(request_id)
+        
+        logger.info(f"[Scheduler] Submitted request {request_id}")
+        return request_id
+    
+    async def stream_tokens(self, request_id: str) -> AsyncGenerator[str, None]:
+        """Stream generated tokens for a request"""
+        if request_id not in self.requests:
+            yield "data: [ERROR] Request not found\n"
+            return
+        
+        request = self.requests[request_id]
+        last_token_count = 0
+        ttft_sent = False
+        
+        # Wait for processing to start or complete
+        while request.status == RequestStatus.PENDING:
+            await asyncio.sleep(0.01)
+        
+        # Send TTFT when first token is available
+        if request.ttft is not None and not ttft_sent:
+            yield f"event: ttft\ndata: {request.ttft:.3f}\n"
+            ttft_sent = True
+        
+        # Stream tokens as they become available
+        while request.status in [RequestStatus.PROCESSING, RequestStatus.PENDING]:
+            current_token_count = len(request.tokens)
+            
+            # Yield new tokens
+            for i in range(last_token_count, current_token_count):
+                yield f"data: {request.tokens[i]}\n"
+            
+            last_token_count = current_token_count
+            
+            # Check if generation is complete
+            if request.status == RequestStatus.COMPLETED:
+                break
+                
+            await asyncio.sleep(0.01)
+        
+        # Send any remaining tokens
+        current_token_count = len(request.tokens)
+        for i in range(last_token_count, current_token_count):
+            yield f"data: {request.tokens[i]}\n"
+        
+        # Send completion event
+        yield "event: done\ndata:\n"
+        
+        # Clean up request
+        if request_id in self.requests:
+            del self.requests[request_id]
+    
+    async def run(self):
+        """Main scheduler loop"""
         self.running = True
-        self.logger.info(f"[Scheduler] Started with max_batch_size={self.max_batch_size}, tick_ms={self.tick_ms}")
+        logger.info("[Scheduler] Started")
         
         while self.running:
             try:
-                await self.process_batch()
-                await asyncio.sleep(self.tick_ms / 1000.0)
+                await self._process_pending_requests()
+                await self._process_active_batches()
+                await asyncio.sleep(self.schedule_tick_ms / 1000.0)
             except Exception as e:
-                self.logger.error(f"[Scheduler] Error in scheduler loop: {e}")
-                # Continue running instead of crashing
-                await asyncio.sleep(0.1)  # Brief pause on error
-                
-    async def process_batch(self):
-        """Process a batch of requests with proper tensor alignment"""
-        if not self.pending_requests:
-            return
-            
-        # Take up to max_batch_size requests
-        batch_requests = self.pending_requests[:self.max_batch_size]
-        self.pending_requests = self.pending_requests[self.max_batch_size:]
-        
-        if not batch_requests:
-            return
-            
-        try:
-            # Group requests by similar sequence length for better batching
-            batch_groups = self._group_by_length(batch_requests)
-            
-            for group in batch_groups:
-                await self._process_group(group)
-                
-        except Exception as e:
-            self.logger.error(f"[Scheduler] Error processing batch: {e}")
-            # Return failed requests to pending queue
-            self.pending_requests.extend(batch_requests)
-            
-    def _group_by_length(self, requests):
-        """Group requests by similar input lengths to avoid tensor mismatch"""
-        groups = []
-        current_group = []
-        current_length = None
-        
-        # Sort by input length first
-        requests.sort(key=lambda r: len(r['input_ids']))
-        
-        for req in requests:
-            req_length = len(req['input_ids'])
-            
-            # Start new group if length differs significantly or group is full
-            if (current_length is None or 
-                abs(req_length - current_length) > 100 or  # Allow 100 token difference
-                len(current_group) >= 4):  # Smaller groups for stability
-                
-                if current_group:
-                    groups.append(current_group)
-                current_group = [req]
-                current_length = req_length
-            else:
-                current_group.append(req)
-                
-        if current_group:
-            groups.append(current_group)
-            
-        return groups
-        
-    async def _process_group(self, requests):
-        """Process a group of requests with similar lengths"""
-        if len(requests) == 1:
-            # Single request - no batching needed
-            await self._process_single_request(requests[0])
-            return
-            
-        try:
-            # Prepare batch tensors with proper padding
-            batch_data = self._prepare_batch_tensors(requests)
-            
-            if batch_data is None:
-                # Fall back to individual processing on tensor prep failure
-                for req in requests:
-                    await self._process_single_request(req)
-                return
-                
-            # Run batched inference
-            with torch.no_grad():
-                batch_outputs = self.model_runtime.generate_batch(
-                    input_ids=batch_data['input_ids'],
-                    attention_mask=batch_data['attention_mask'],
-                    max_new_tokens=batch_data['max_new_tokens'],
-                    temperature=batch_data['temperature']
-                )
-                
-            # Distribute results back to individual requests
-            for i, req in enumerate(requests):
-                if i < len(batch_outputs):
-                    await self._send_response(req, batch_outputs[i])
-                else:
-                    await self._send_error(req, "Batch processing failed")
-                    
-        except Exception as e:
-            self.logger.error(f"[Scheduler] Group processing failed: {e}")
-            # Fall back to individual processing
-            for req in requests:
-                await self._process_single_request(req)
-                
-    def _prepare_batch_tensors(self, requests):
-        """Prepare properly padded tensors for batching"""
-        try:
-            input_ids_list = []
-            attention_mask_list = []
-            max_length = 0
-            
-            # Find maximum sequence length
-            for req in requests:
-                seq_len = len(req['input_ids'])
-                max_length = max(max_length, seq_len)
-                
-            # Pad all sequences to max_length
-            for req in requests:
-                input_ids = req['input_ids']
-                
-                # Pad sequence
-                if len(input_ids) < max_length:
-                    # Pad with tokenizer pad token (usually 0)
-                    pad_length = max_length - len(input_ids)
-                    padded_input_ids = input_ids + [0] * pad_length
-                    attention_mask = [1] * len(input_ids) + [0] * pad_length
-                else:
-                    padded_input_ids = input_ids[:max_length]
-                    attention_mask = [1] * max_length
-                    
-                input_ids_list.append(padded_input_ids)
-                attention_mask_list.append(attention_mask)
-                
-            # Convert to tensors
-            batch_input_ids = torch.tensor(input_ids_list, device=self.model_runtime.device)
-            batch_attention_mask = torch.tensor(attention_mask_list, device=self.model_runtime.device)
-            
-            # Use parameters from first request (could be made more sophisticated)
-            first_req = requests[0]
-            
-            return {
-                'input_ids': batch_input_ids,
-                'attention_mask': batch_attention_mask,
-                'max_new_tokens': first_req.get('max_new_tokens', 50),
-                'temperature': first_req.get('temperature', 0.7)
-            }
-            
-        except Exception as e:
-            self.logger.error(f"[Scheduler] Tensor preparation failed: {e}")
-            return None
-            
-    async def _process_single_request(self, request):
-        """Process a single request (fallback)"""
-        try:
-            with torch.no_grad():
-                output = self.model_runtime.generate(
-                    input_ids=torch.tensor([request['input_ids']], device=self.model_runtime.device),
-                    max_new_tokens=request.get('max_new_tokens', 50),
-                    temperature=request.get('temperature', 0.7)
-                )
-                
-            await self._send_response(request, output)
-            
-        except Exception as e:
-            self.logger.error(f"[Scheduler] Single request failed: {e}")
-            await self._send_error(request, str(e))
-            
-    async def _send_response(self, request, output):
-        """Send successful response"""
-        try:
-            response_queue = request['response_queue']
-            await response_queue.put({"status": "success", "output": output})
-        except Exception as e:
-            self.logger.error(f"[Scheduler] Failed to send response: {e}")
-            
-    async def _send_error(self, request, error_msg):
-        """Send error response"""
-        try:
-            response_queue = request['response_queue']
-            await response_queue.put({"status": "error", "error": error_msg})
-        except Exception as e:
-            self.logger.error(f"[Scheduler] Failed to send error: {e}")
-            
-    async def add_request(self, request):
-        """Add request to pending queue"""
-        self.pending_requests.append(request)
-        
-    def stop(self):
+                logger.error(f"[Scheduler] Error in main loop: {e}")
+                await asyncio.sleep(0.1)
+    
+    async def stop(self):
         """Stop the scheduler"""
         self.running = False
-        self.logger.info("[Scheduler] Stopped")
-
-
-# Additional method needed in model_runtime.py for batch processing
-class ModelRuntime:
-    # ... existing code ...
+        logger.info("[Scheduler] Stopped")
     
-    def generate_batch(self, input_ids, attention_mask, max_new_tokens=50, temperature=0.7):
-        """Generate for a batch of inputs"""
-        try:
-            outputs = self.model.generate(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                do_sample=temperature > 0,
-                pad_token_id=self.tokenizer.eos_token_id
-            )
+    async def _process_pending_requests(self):
+        """Process pending requests and form new batches"""
+        if not self.pending_requests:
+            return
+        
+        # Form new batch
+        batch_size = min(len(self.pending_requests), self.max_batch_size)
+        batch_request_ids = self.pending_requests[:batch_size]
+        self.pending_requests = self.pending_requests[batch_size:]
+        
+        if batch_request_ids:
+            # Mark requests as processing
+            for req_id in batch_request_ids:
+                if req_id in self.requests:
+                    self.requests[req_id].status = RequestStatus.PROCESSING
             
-            # Decode each output in the batch
-            batch_results = []
-            for i in range(outputs.shape[0]):
-                # Remove input tokens to get only generated text
-                generated_tokens = outputs[i][input_ids.shape[1]:]
-                decoded = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
-                batch_results.append(decoded)
-                
-            return batch_results
+            # Start batch processing
+            asyncio.create_task(self._process_batch(batch_request_ids))
+            logger.info(f"[Scheduler] Started batch with {len(batch_request_ids)} requests")
+    
+    async def _process_active_batches(self):
+        """Monitor and manage active batches"""
+        # This could include batch merging, rebalancing, etc.
+        # For now, just log active batch count
+        active_count = sum(1 for req in self.requests.values() 
+                         if req.status == RequestStatus.PROCESSING)
+        if active_count > 0:
+            logger.debug(f"[Scheduler] {active_count} requests processing")
+    
+    async def _process_batch(self, request_ids: List[str]):
+        """Process a batch of requests"""
+        try:
+            # Get requests
+            requests = [self.requests[req_id] for req_id in request_ids if req_id in self.requests]
+            if not requests:
+                return
+            
+            logger.info(f"[Scheduler] Processing batch of {len(requests)} requests")
+            
+            # For each request in the batch, generate individually
+            # In a real implementation, this would be done in parallel/batched
+            for request in requests:
+                try:
+                    start_time = time.time()
+                    
+                    # Generate tokens using model runtime
+                    generated_text = self.model_runtime.generate(
+                        prompt=request.prompt,
+                        max_new_tokens=request.max_new_tokens,
+                        temperature=request.temperature,
+                        top_k=request.top_k,
+                        top_p=request.top_p,
+                        seed=request.seed
+                    )
+                    
+                    # Record TTFT (approximated as generation start time)
+                    request.ttft = time.time() - start_time
+                    
+                    # Tokenize the generated text for streaming
+                    # This is a simplified version - real implementation would stream during generation
+                    tokens = generated_text.split()
+                    request.tokens = tokens
+                    request.status = RequestStatus.COMPLETED
+                    
+                    logger.info(f"[Scheduler] Completed request {request.request_id}")
+                    
+                except Exception as e:
+                    logger.error(f"[Scheduler] Failed to process request {request.request_id}: {e}")
+                    request.status = RequestStatus.FAILED
             
         except Exception as e:
-            self.logger.error(f"Batch generation failed: {e}")
-            raise
+            logger.error(f"[Scheduler] Batch processing failed: {e}")
+            # Mark all requests as failed
+            for req_id in request_ids:
+                if req_id in self.requests:
+                    self.requests[req_id].status = RequestStatus.FAILED

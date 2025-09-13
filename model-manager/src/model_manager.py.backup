@@ -1,0 +1,327 @@
+"""
+TorchWeave LLM Model Manager
+Handles model loading, staging, and management operations
+"""
+
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel, Field
+from typing import Dict, Any, Optional, Union, List
+import logging
+import asyncio
+import httpx
+import os
+import json
+from pathlib import Path
+from huggingface_hub import snapshot_download
+import shutil
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="TorchWeave Model Manager", version="1.0.0")
+
+# Configuration
+ARTIFACT_DIR = os.environ.get("ARTIFACT_DIR", "/artifacts")
+ARTIFACT_MODEL_DIR = os.environ.get("ARTIFACT_MODEL_DIR", "/artifacts/model")
+SERVER_URL = os.environ.get("SERVER_URL", "http://server-cpu:8000")
+
+# Data Models
+class ModelConfig(BaseModel):
+    model_id: str
+    source: str = "huggingface"
+    device: Optional[str] = None
+    precision: Optional[str] = None
+    cache_dir: Optional[str] = None
+
+class LoadModelRequest(BaseModel):
+    # Changed from model_config to model_settings to avoid Pydantic v2 conflict
+    model_settings: Union[ModelConfig, Dict[str, Any]] = Field(alias="model_config")
+
+class LoadModelFlatRequest(BaseModel):
+    model_id: str
+    source: str = "huggingface"
+    device: Optional[str] = None
+    precision: Optional[str] = None
+    cache_dir: Optional[str] = None
+
+class ModelInfo(BaseModel):
+    model_id: str
+    source: str
+    display_name: str
+    description: str
+    status: str
+    path: str
+    device: Optional[str] = None
+
+# In-memory model registry
+model_registry: Dict[str, ModelInfo] = {}
+
+# Utility Functions
+def ensure_directories():
+    """Ensure required directories exist"""
+    Path(ARTIFACT_DIR).mkdir(parents=True, exist_ok=True)
+    Path(ARTIFACT_MODEL_DIR).mkdir(parents=True, exist_ok=True)
+
+def extract_model_config(request_data: Union[Dict, LoadModelRequest, LoadModelFlatRequest]) -> Dict[str, Any]:
+    """Extract model configuration from various request formats"""
+    if isinstance(request_data, LoadModelFlatRequest):
+        return {
+            "model_id": request_data.model_id,
+            "source": request_data.source,
+            "device": request_data.device,
+            "precision": request_data.precision,
+            "cache_dir": request_data.cache_dir
+        }
+    
+    if isinstance(request_data, LoadModelRequest):
+        model_settings = request_data.model_settings
+    elif isinstance(request_data, dict):
+        model_settings = request_data.get("model_config", {})
+    else:
+        raise ValueError("Invalid request format")
+    
+    # Handle both dict and object access
+    if isinstance(model_settings, dict):
+        return {
+            "model_id": model_settings.get("model_id"),
+            "source": model_settings.get("source", "huggingface"),
+            "device": model_settings.get("device"),
+            "precision": model_settings.get("precision"),
+            "cache_dir": model_settings.get("cache_dir")
+        }
+    else:
+        # Handle as Pydantic model/object
+        return {
+            "model_id": getattr(model_settings, "model_id", None),
+            "source": getattr(model_settings, "source", "huggingface"),
+            "device": getattr(model_settings, "device", None),
+            "precision": getattr(model_settings, "precision", None),
+            "cache_dir": getattr(model_settings, "cache_dir", None)
+        }
+
+async def download_model_from_hf(model_id: str, local_path: str) -> bool:
+    """Download model from Hugging Face Hub"""
+    try:
+        logger.info(f"Downloading {model_id} from Hugging Face")
+        
+        # Clear existing model directory
+        if os.path.exists(local_path):
+            shutil.rmtree(local_path)
+        
+        # Download model
+        snapshot_download(
+            repo_id=model_id,
+            local_dir=local_path,
+            local_dir_use_symlinks=False
+        )
+        
+        logger.info(f"Model {model_id} staged to {local_path}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to download model {model_id}: {str(e)}")
+        return False
+
+async def check_server_health() -> bool:
+    """Check if the inference server is healthy"""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{SERVER_URL}/health", timeout=5.0)
+            return response.status_code == 200
+    except Exception as e:
+        logger.warning(f"Server health check failed: {str(e)}")
+        return False
+
+# API Endpoints
+@app.on_event("startup")
+async def startup_event():
+    """Initialize the model manager"""
+    ensure_directories()
+    logger.info("Model Manager started successfully")
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "ok", "service": "model-manager"}
+
+@app.post("/models/load")
+async def load_model(request: Union[Dict[str, Any], dict]):
+    """Load model with nested config structure - handles both dict and Pydantic models"""
+    try:
+        # Handle raw dict input (bypass Pydantic validation issues)
+        if isinstance(request, dict):
+            model_settings = request.get("model_config", {})
+        else:
+            model_settings = getattr(request, "model_settings", {})
+        
+        # Extract model configuration
+        if isinstance(model_settings, dict):
+            model_id = model_settings.get("model_id")
+            source = model_settings.get("source", "huggingface")
+            device = model_settings.get("device")
+        else:
+            model_id = getattr(model_settings, "model_id", None)
+            source = getattr(model_settings, "source", "huggingface")
+            device = getattr(model_settings, "device", None)
+        
+        if not model_id:
+            raise ValueError("model_id is required in model configuration")
+        
+        logger.info(f"Loading model: {model_id} from {source}")
+        
+        # Check if already loaded
+        if model_id in model_registry:
+            logger.info(f"Model {model_id} already in registry")
+            return {
+                "status": "success",
+                "message": "Model already loaded",
+                "model_id": model_id
+            }
+        
+        # Download and stage model
+        if source == "huggingface":
+            success = await download_model_from_hf(model_id, ARTIFACT_MODEL_DIR)
+            if not success:
+                raise RuntimeError(f"Failed to download model {model_id}")
+        else:
+            raise ValueError(f"Unsupported model source: {source}")
+        
+        # Register model
+        model_info = ModelInfo(
+            model_id=model_id,
+            source=source,
+            display_name=model_id,
+            description=f"Model {model_id}",
+            status="ready",
+            path=ARTIFACT_MODEL_DIR,
+            device=device
+        )
+        
+        model_registry[model_id] = model_info
+        logger.info(f"Model {model_id} loaded successfully")
+        
+        return {
+            "status": "success",
+            "message": "Model loaded successfully",
+            "model_id": model_id,
+            "path": ARTIFACT_MODEL_DIR
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to load model: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/models/load_flat")
+async def load_model_flat(request: LoadModelFlatRequest):
+    """Load model with flat structure"""
+    try:
+        model_id = request.model_id
+        source = request.source
+        device = request.device
+        
+        logger.info(f"Loading model: {model_id} from {source}")
+        
+        # Check if already loaded
+        if model_id in model_registry:
+            logger.info(f"Model {model_id} already in registry")
+            return {
+                "status": "success",
+                "message": "Model already loaded",
+                "model_id": model_id
+            }
+        
+        # Download and stage model
+        if source == "huggingface":
+            success = await download_model_from_hf(model_id, ARTIFACT_MODEL_DIR)
+            if not success:
+                raise RuntimeError(f"Failed to download model {model_id}")
+        else:
+            raise ValueError(f"Unsupported model source: {source}")
+        
+        # Register model
+        model_info = ModelInfo(
+            model_id=model_id,
+            source=source,
+            display_name=model_id,
+            description=f"Model {model_id}",
+            status="ready",
+            path=ARTIFACT_MODEL_DIR,
+            device=device
+        )
+        
+        model_registry[model_id] = model_info
+        logger.info(f"Model {model_id} loaded successfully")
+        
+        return {
+            "status": "success",
+            "message": "Model loaded successfully",
+            "model_id": model_id,
+            "path": ARTIFACT_MODEL_DIR
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to load model: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/models")
+async def list_models():
+    """List all loaded models"""
+    models = [model_info.dict() for model_info in model_registry.values()]
+    return {"models": models}
+
+@app.get("/models/{model_id}")
+async def get_model(model_id: str):
+    """Get information about a specific model"""
+    if model_id not in model_registry:
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    return model_registry[model_id].dict()
+
+@app.delete("/models/{model_id}")
+async def unload_model(model_id: str):
+    """Unload a specific model"""
+    if model_id not in model_registry:
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    # Remove from registry
+    del model_registry[model_id]
+    
+    logger.info(f"Model {model_id} unloaded")
+    return {
+        "status": "success",
+        "message": f"Model {model_id} unloaded successfully"
+    }
+
+@app.get("/server/status")
+async def server_status():
+    """Check the status of the inference server"""
+    is_healthy = await check_server_health()
+    return {
+        "server_healthy": is_healthy,
+        "server_url": SERVER_URL,
+        "status": "connected" if is_healthy else "disconnected"
+    }
+
+@app.get("/artifacts")
+async def list_artifacts():
+    """List artifacts in the artifact directory"""
+    try:
+        artifacts = []
+        if os.path.exists(ARTIFACT_DIR):
+            for item in os.listdir(ARTIFACT_DIR):
+                item_path = os.path.join(ARTIFACT_DIR, item)
+                artifacts.append({
+                    "name": item,
+                    "path": item_path,
+                    "is_dir": os.path.isdir(item_path),
+                    "size": os.path.getsize(item_path) if os.path.isfile(item_path) else None
+                })
+        
+        return {"artifacts": artifacts, "artifact_dir": ARTIFACT_DIR}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)

@@ -3,1295 +3,1206 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TorchWeave LLM - Model Management & Inference</title>
+    <title>TorchWeave LLM - Advanced Inference Platform</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-
+        
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
-            color: #2d3748;
+            color: #333;
         }
-
+        
         .container {
             max-width: 1400px;
             margin: 0 auto;
-            background: rgba(255, 255, 255, 0.98);
-            backdrop-filter: blur(15px);
-            border-radius: 20px;
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
-            overflow: hidden;
-            margin-top: 20px;
-            margin-bottom: 20px;
+            padding: 20px;
         }
-
+        
         .header {
-            background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);
-            color: white;
-            padding: 30px;
             text-align: center;
-            position: relative;
+            margin-bottom: 30px;
         }
-
+        
         .header h1 {
-            font-size: 2.8rem;
+            color: white;
+            font-size: 2.5em;
             margin-bottom: 10px;
-            font-weight: 700;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
         }
-
+        
         .header p {
-            font-size: 1.2rem;
-            opacity: 0.9;
-            margin-bottom: 20px;
+            color: rgba(255,255,255,0.9);
+            font-size: 1.2em;
         }
-
-        .status-bar {
+        
+        .tabs {
             display: flex;
-            justify-content: center;
-            gap: 20px;
-            margin-top: 15px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 5px;
+            margin-bottom: 30px;
+            backdrop-filter: blur(10px);
         }
-
-        .tab-nav {
-            background: #f8fafc;
-            border-bottom: 2px solid #e2e8f0;
-            display: flex;
-            justify-content: center;
-        }
-
-        .tab-button {
-            background: none;
+        
+        .tab {
+            flex: 1;
+            padding: 15px;
+            text-align: center;
+            background: transparent;
             border: none;
-            padding: 20px 30px;
-            font-size: 16px;
-            font-weight: 600;
+            color: white;
             cursor: pointer;
-            color: #4a5568;
-            border-bottom: 3px solid transparent;
+            border-radius: 10px;
             transition: all 0.3s ease;
+            font-size: 1.1em;
         }
-
-        .tab-button.active {
-            color: #667eea;
-            border-bottom-color: #667eea;
-            background: rgba(102, 126, 234, 0.05);
+        
+        .tab.active {
+            background: rgba(255,255,255,0.2);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
         }
-
-        .tab-button:hover {
-            background: rgba(102, 126, 234, 0.1);
-        }
-
+        
         .tab-content {
             display: none;
+            background: rgba(255,255,255,0.95);
+            border-radius: 20px;
             padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
         }
-
+        
         .tab-content.active {
             display: block;
         }
-
-        .models-grid {
-            display: grid;
-            grid-template-columns: 1fr 2fr;
-            gap: 30px;
-            margin-bottom: 30px;
-        }
-
-        .model-card {
-            background: #f8fafc;
-            border: 2px solid #e2e8f0;
-            border-radius: 15px;
-            padding: 20px;
-            transition: all 0.3s ease;
-            cursor: pointer;
-        }
-
-        .model-card:hover {
-            border-color: #667eea;
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.15);
-        }
-
-        .model-card.selected {
-            border-color: #667eea;
-            background: rgba(102, 126, 234, 0.05);
-        }
-
-        .model-card.loading {
-            border-color: #f59e0b;
-            background: rgba(245, 158, 11, 0.05);
-        }
-
-        .model-card.error {
-            border-color: #ef4444;
-            background: rgba(239, 68, 68, 0.05);
-        }
-
-        .model-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 15px;
-        }
-
-        .model-title {
-            font-size: 18px;
-            font-weight: 700;
-            color: #2d3748;
-            margin-bottom: 5px;
-        }
-
-        .model-description {
-            font-size: 14px;
-            color: #4a5568;
-            margin-bottom: 10px;
-        }
-
-        .model-meta {
-            display: flex;
-            gap: 15px;
-            font-size: 12px;
-            color: #718096;
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 8px;
-            background: #e2e8f0;
-            border-radius: 4px;
-            overflow: hidden;
-            margin-top: 10px;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            transition: width 0.3s ease;
-            border-radius: 4px;
-        }
-
-        .inference-section {
+        
+        .model-section {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 30px;
+            margin-bottom: 30px;
         }
-
-        .input-panel {
-            background: #f8fafc;
-            padding: 25px;
+        
+        .model-card {
+            background: linear-gradient(145deg, #f0f2f5, #ffffff);
             border-radius: 15px;
-            border: 2px solid #e2e8f0;
-        }
-
-        .output-panel {
-            background: #1a202c;
-            color: #e2e8f0;
             padding: 25px;
-            border-radius: 15px;
-            min-height: 500px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
         }
-
-        .form-group {
+        
+        .model-card h3 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+        }
+        
+        .model-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .available-model {
+            background: linear-gradient(145deg, #ffffff, #f8f9fa);
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .available-model:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
+            transform: translateY(-2px);
+        }
+        
+        .available-model.loaded {
+            border-color: #28a745;
+            background: linear-gradient(145deg, #f8fff9, #ffffff);
+        }
+        
+        .model-info h4 {
+            color: #333;
+            margin-bottom: 8px;
+        }
+        
+        .model-info p {
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 5px;
+        }
+        
+        .model-badges {
+            margin-top: 10px;
+        }
+        
+        .badge {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            margin-right: 5px;
+        }
+        
+        .inference-section {
+            margin-top: 30px;
+        }
+        
+        .input-group {
             margin-bottom: 20px;
         }
-
-        label {
+        
+        .input-group label {
             display: block;
             margin-bottom: 8px;
             font-weight: 600;
-            color: #2d3748;
+            color: #555;
         }
-
-        input, textarea, select {
+        
+        .input-group select,
+        .input-group input,
+        .input-group textarea {
             width: 100%;
             padding: 12px;
-            border: 2px solid #e2e8f0;
+            border: 2px solid #e9ecef;
             border-radius: 8px;
-            font-size: 14px;
+            font-size: 1em;
             transition: border-color 0.3s ease;
         }
-
-        input:focus, textarea:focus, select:focus {
+        
+        .input-group select:focus,
+        .input-group input:focus,
+        .input-group textarea:focus {
             outline: none;
             border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
-
-        textarea {
-            resize: vertical;
-            min-height: 120px;
-        }
-
-        .controls-grid {
+        
+        .parameters-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
             gap: 15px;
+            margin-bottom: 20px;
         }
-
+        
         .btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(145deg, #667eea, #764ba2);
             color: white;
             border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
+            padding: 15px 30px;
+            border-radius: 10px;
             cursor: pointer;
+            font-size: 1.1em;
+            font-weight: 600;
             transition: all 0.3s ease;
-            width: 100%;
+            margin: 5px;
         }
-
+        
         .btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
         }
-
+        
         .btn:disabled {
-            background: #cbd5e0;
+            opacity: 0.6;
             cursor: not-allowed;
             transform: none;
-            box-shadow: none;
         }
-
-        .btn-secondary {
-            background: linear-gradient(135deg, #718096 0%, #4a5568 100%);
-        }
-
+        
         .btn-danger {
-            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            background: linear-gradient(145deg, #dc3545, #c82333);
         }
-
-        .btn-small {
-            padding: 8px 16px;
-            font-size: 14px;
+        
+        .btn-success {
+            background: linear-gradient(145deg, #28a745, #20c997);
         }
-
-        .status {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
+        
+        .output-section {
+            margin-top: 30px;
         }
-
-        .status.connected {
-            background: #10b981;
-            color: white;
-        }
-
-        .status.disconnected {
-            background: #ef4444;
-            color: white;
-        }
-
-        .status.loading {
-            background: #f59e0b;
-            color: white;
-        }
-
-        .status-indicator {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: currentColor;
-        }
-
-        .loading-spinner {
-            width: 12px;
-            height: 12px;
-            border: 2px solid currentColor;
-            border-radius: 50%;
-            border-top-color: transparent;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .search-section {
-            background: #f8fafc;
+        
+        .output-box {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
             padding: 20px;
-            border-radius: 15px;
-            border: 2px solid #e2e8f0;
-            margin-bottom: 30px;
-        }
-
-        .search-controls {
-            display: flex;
-            gap: 15px;
-            align-items: flex-end;
-        }
-
-        .search-results {
-            margin-top: 20px;
-            max-height: 300px;
+            min-height: 200px;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
             overflow-y: auto;
+            max-height: 400px;
         }
-
-        .search-result {
-            background: white;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 10px;
-            cursor: pointer;
-            transition: all 0.2s ease;
+        
+        .streaming-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #28a745;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+            margin-right: 10px;
         }
-
-        .search-result:hover {
-            border-color: #667eea;
-            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
         }
-
+        
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-top: 30px;
+        }
+        
+        .comparison-box {
+            background: linear-gradient(145deg, #f8f9fa, #ffffff);
+            border-radius: 15px;
+            padding: 25px;
+            border: 2px solid #e9ecef;
+        }
+        
         .metrics {
-            display: flex;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
             gap: 15px;
-            margin-top: 15px;
-            padding-top: 15px;
-            border-top: 1px solid #4a5568;
-            flex-wrap: wrap;
+            margin-top: 20px;
         }
-
+        
         .metric {
             background: rgba(102, 126, 234, 0.1);
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            white-space: nowrap;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
         }
-
-        .output-content {
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 14px;
-            line-height: 1.6;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            max-height: 400px;
-            overflow-y: auto;
+        
+        .metric-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #667eea;
         }
-
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.5);
+        
+        .metric-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
         }
-
-        .modal-content {
-            background-color: white;
-            margin: 5% auto;
-            padding: 30px;
-            border-radius: 15px;
-            width: 90%;
-            max-width: 600px;
-            max-height: 80vh;
-            overflow-y: auto;
-        }
-
-        .modal-header {
+        
+        .status-bar {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
+            background: rgba(255,255,255,0.1);
+            padding: 15px 25px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+            backdrop-filter: blur(10px);
         }
-
-        .close {
-            color: #aaa;
-            font-size: 28px;
-            font-weight: bold;
+        
+        .status-item {
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #28a745;
+        }
+        
+        .status-dot.error {
+            background: #dc3545;
+        }
+        
+        .batch-input-section {
+            margin-top: 20px;
+        }
+        
+        .prompt-input {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .prompt-input input {
+            flex: 1;
+        }
+        
+        .prompt-input button {
+            padding: 8px 15px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 5px;
             cursor: pointer;
         }
-
-        .close:hover {
-            color: #000;
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
         }
-
-        .alert {
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-
-        .alert.success {
-            background: #d1fae5;
-            border: 1px solid #10b981;
-            color: #065f46;
-        }
-
-        .alert.error {
-            background: #fee2e2;
-            border: 1px solid #ef4444;
-            color: #991b1b;
-        }
-
-        .alert.warning {
-            background: #fef3c7;
-            border: 1px solid #f59e0b;
-            color: #92400e;
-        }
-
-        @media (max-width: 768px) {
-            .models-grid,
-            .inference-section {
-                grid-template-columns: 1fr;
-            }
-            
-            .controls-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .search-controls {
-                flex-direction: column;
-            }
-
-            .status-bar {
-                flex-direction: column;
-                gap: 10px;
-            }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>TorchWeave LLM</h1>
-            <p>Advanced Model Management & High-Performance Inference</p>
-            <div class="status-bar">
-                <div class="status disconnected" id="inferenceStatus">
-                    <div class="status-indicator"></div>
-                    Inference: Offline
-                </div>
-                <div class="status disconnected" id="modelManagerStatus">
-                    <div class="status-indicator"></div>
-                    Model Manager: Offline
-                </div>
+            <h1>🔥 TorchWeave LLM</h1>
+            <p>Advanced Language Model Inference Platform</p>
+        </div>
+        
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="status-dot" id="backendStatus"></div>
+                <span>Backend Status: <span id="backendStatusText">Checking...</span></span>
+            </div>
+            <div class="status-item">
+                <span>Loaded Models: <span id="loadedModelsCount">0</span></span>
+            </div>
+            <div class="status-item">
+                <span>Memory: <span id="memoryUsage">--</span></span>
             </div>
         </div>
-
-        <nav class="tab-nav">
-            <button class="tab-button active" onclick="showTab('models')">Model Management</button>
-            <button class="tab-button" onclick="showTab('inference')">Inference</button>
-        </nav>
-
+        
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('models')">Model Management</button>
+            <button class="tab" onclick="showTab('inference')">Single Inference</button>
+            <button class="tab" onclick="showTab('streaming')">SSE Streaming</button>
+            <button class="tab" onclick="showTab('batch')">Batch Processing</button>
+            <button class="tab" onclick="showTab('comparison')">Performance Comparison</button>
+        </div>
+        
         <!-- Model Management Tab -->
-        <div id="modelsTab" class="tab-content active">
-            <!-- Model Search Section -->
-            <div class="search-section">
-                <h3 style="margin-bottom: 15px;">Search HuggingFace Models</h3>
-                <div class="search-controls">
-                    <div class="form-group" style="flex: 1; margin-bottom: 0;">
-                        <input type="text" id="searchQuery" placeholder="Search for models (e.g., 'microsoft/DialoGPT')" value="">
-                    </div>
-                    <button class="btn btn-secondary" onclick="searchModels()">Search</button>
-                </div>
-                <div id="searchResults" class="search-results"></div>
+        <div id="models" class="tab-content active">
+            <h2>Available Models</h2>
+            <div id="availableModels" class="model-grid">
+                <!-- Models will be loaded here -->
             </div>
-
-            <!-- Current Models -->
-            <div class="models-grid">
-                <div>
-                    <h3 style="margin-bottom: 20px;">Available Models</h3>
-                    <div id="modelsList">
-                        <div class="alert warning">
-                            Loading models...
-                        </div>
-                    </div>
-                    <button class="btn" onclick="showAddModelModal()" style="margin-top: 15px;">
-                        Add Custom Model
-                    </button>
-                </div>
-
-                <div>
-                    <h3 style="margin-bottom: 20px;">Model Details</h3>
-                    <div id="modelDetails" style="background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 15px; padding: 25px; min-height: 300px;">
-                        <p style="color: #718096; text-align: center; margin-top: 100px;">Select a model to view details</p>
-                    </div>
-                </div>
+            
+            <h2>Loaded Models</h2>
+            <div id="loadedModels" class="model-grid">
+                <!-- Loaded models will be shown here -->
             </div>
         </div>
-
-        <!-- Inference Tab -->
-        <div id="inferenceTab" class="tab-content">
-            <div id="noModelAlert" class="alert warning" style="display: none;">
-                No model loaded. Please load a model from the Model Management tab first.
-            </div>
-
-            <div class="inference-section">
-                <div class="input-panel">
-                    <h3 style="margin-bottom: 20px;">Generation Parameters</h3>
-                    
-                    <div class="form-group">
-                        <label for="prompt">Prompt</label>
-                        <textarea id="prompt" placeholder="Enter your prompt here...">Explain the concept of machine learning in simple terms.</textarea>
+        
+        <!-- Single Inference Tab -->
+        <div id="inference" class="tab-content">
+            <div class="model-section">
+                <div class="model-card">
+                    <h3>Model Selection</h3>
+                    <div class="input-group">
+                        <label>Select Model:</label>
+                        <select id="inferenceModel">
+                            <option value="">Select a loaded model...</option>
+                        </select>
                     </div>
-
-                    <div class="controls-grid">
-                        <div class="form-group">
-                            <label for="maxTokens">Max Tokens</label>
-                            <input type="number" id="maxTokens" value="128" min="1" max="2048">
+                </div>
+                
+                <div class="model-card">
+                    <h3>Parameters</h3>
+                    <div class="parameters-grid">
+                        <div class="input-group">
+                            <label>Max Length:</label>
+                            <input type="number" id="maxLength" value="100" min="10" max="500">
                         </div>
-                        <div class="form-group">
-                            <label for="temperature">Temperature</label>
+                        <div class="input-group">
+                            <label>Temperature:</label>
                             <input type="number" id="temperature" value="0.7" min="0.1" max="2.0" step="0.1">
                         </div>
-                    </div>
-
-                    <div class="controls-grid">
-                        <div class="form-group">
-                            <label for="topK">Top K</label>
-                            <input type="number" id="topK" value="50" min="1" max="100">
-                        </div>
-                        <div class="form-group">
-                            <label for="topP">Top P</label>
+                        <div class="input-group">
+                            <label>Top P:</label>
                             <input type="number" id="topP" value="0.9" min="0.1" max="1.0" step="0.1">
                         </div>
                     </div>
-
-                    <div class="form-group">
-                        <label for="endpoint">Inference Mode</label>
-                        <select id="endpoint">
-                            <option value="/v1/generate">SSE Streaming (Recommended)</option>
-                            <option value="/v1/generate_nobatch">Standard (No Batching)</option>
-                        </select>
-                    </div>
-
-                    <button class="btn" id="generateBtn" onclick="generateText()">
-                        Generate Text
-                    </button>
-
-                    <button class="btn btn-secondary" onclick="clearOutput()">
-                        Clear Output
-                    </button>
                 </div>
-
-                <div class="output-panel">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h3>Generated Output</h3>
-                        <div class="status disconnected" id="generationStatus">Ready</div>
-                    </div>
-                    
-                    <div class="output-content" id="output">
-Welcome to TorchWeave LLM Interface!
-
-Features:
-• Dynamic model loading from HuggingFace
-• Real-time SSE token streaming  
-• Advanced continuous batching
-• Performance metrics & monitoring
-• Multi-model support
-
-Load a model from the Model Management tab to get started.
-                    </div>
-
-                    <div class="metrics" id="metrics" style="display: none;">
+            </div>
+            
+            <div class="inference-section">
+                <div class="input-group">
+                    <label>Prompt:</label>
+                    <textarea id="prompt" rows="4" placeholder="Enter your prompt here...">Hello, how are you doing today?</textarea>
+                </div>
+                
+                <button class="btn" onclick="generateText()" id="generateBtn">Generate Text</button>
+                
+                <div class="output-section">
+                    <label>Generated Text:</label>
+                    <div id="output" class="output-box">Ready for inference...</div>
+                    <div class="metrics" id="inferenceMetrics" style="display: none;">
                         <div class="metric">
-                            <strong>TTFT:</strong> <span id="ttft">-</span>ms
+                            <div class="metric-value" id="inferenceTime">--</div>
+                            <div class="metric-label">Processing Time (s)</div>
                         </div>
                         <div class="metric">
-                            <strong>Tokens:</strong> <span id="tokenCount">0</span>
-                        </div>
-                        <div class="metric">
-                            <strong>Speed:</strong> <span id="tokensPerSec">-</span> tok/s
-                        </div>
-                        <div class="metric">
-                            <strong>Model:</strong> <span id="currentModel">None</span>
+                            <div class="metric-value" id="tokenCount">--</div>
+                            <div class="metric-label">Tokens Generated</div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-
-    <!-- Add Model Modal -->
-    <div id="addModelModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Add Custom Model</h2>
-                <span class="close" onclick="closeModal()">&times;</span>
+        
+        <!-- SSE Streaming Tab -->
+        <div id="streaming" class="tab-content">
+            <div class="model-section">
+                <div class="model-card">
+                    <h3>Streaming Configuration</h3>
+                    <div class="input-group">
+                        <label>Select Model:</label>
+                        <select id="streamingModel">
+                            <option value="">Select a loaded model...</option>
+                        </select>
+                    </div>
+                    <div class="parameters-grid">
+                        <div class="input-group">
+                            <label>Max Length:</label>
+                            <input type="number" id="streamMaxLength" value="150" min="10" max="500">
+                        </div>
+                        <div class="input-group">
+                            <label>Temperature:</label>
+                            <input type="number" id="streamTemperature" value="0.8" min="0.1" max="2.0" step="0.1">
+                        </div>
+                    </div>
+                </div>
             </div>
             
-            <div class="form-group">
-                <label for="modelId">Model ID</label>
-                <input type="text" id="modelId" placeholder="e.g., microsoft/DialoGPT-medium">
-            </div>
-
-            <div class="form-group">
-                <label for="modelSource">Source</label>
-                <select id="modelSource" onchange="toggleSourceFields()">
-                    <option value="huggingface">HuggingFace Hub</option>
-                    <option value="api">API Endpoint</option>
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label for="displayName">Display Name (Optional)</label>
-                <input type="text" id="displayName" placeholder="Custom display name">
-            </div>
-
-            <div class="form-group">
-                <label for="description">Description (Optional)</label>
-                <textarea id="description" placeholder="Model description" rows="3"></textarea>
-            </div>
-
-            <div id="apiFields" style="display: none;">
-                <div class="form-group">
-                    <label for="apiEndpoint">API Endpoint</label>
-                    <input type="text" id="apiEndpoint" placeholder="https://api.example.com/v1/chat">
+            <div class="inference-section">
+                <div class="input-group">
+                    <label>Prompt:</label>
+                    <textarea id="streamPrompt" rows="4" placeholder="Enter your prompt for streaming...">Write a short story about a robot discovering emotions.</textarea>
                 </div>
-
-                <div class="form-group">
-                    <label for="apiKey">API Key (Optional)</label>
-                    <input type="password" id="apiKey" placeholder="Your API key">
+                
+                <button class="btn" onclick="startStreaming()" id="streamBtn">Start Streaming</button>
+                <button class="btn btn-danger" onclick="stopStreaming()" id="stopStreamBtn" style="display: none;">Stop</button>
+                
+                <div class="output-section">
+                    <label>
+                        <span id="streamingIndicator" style="display: none;">
+                            <span class="streaming-indicator"></span>Streaming...
+                        </span>
+                        Streamed Text:
+                    </label>
+                    <div id="streamOutput" class="output-box">Ready for streaming...</div>
+                    <div class="metrics" id="streamingMetrics" style="display: none;">
+                        <div class="metric">
+                            <div class="metric-value" id="streamTime">--</div>
+                            <div class="metric-label">Total Time (s)</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value" id="streamTokens">--</div>
+                            <div class="metric-label">Tokens Streamed</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value" id="streamSpeed">--</div>
+                            <div class="metric-label">Tokens/sec</div>
+                        </div>
+                    </div>
                 </div>
             </div>
-
-            <div style="display: flex; gap: 15px; margin-top: 25px;">
-                <button class="btn" onclick="addModel()">Add Model</button>
-                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        </div>
+        
+        <!-- Batch Processing Tab -->
+        <div id="batch" class="tab-content">
+            <div class="model-section">
+                <div class="model-card">
+                    <h3>Batch Configuration</h3>
+                    <div class="input-group">
+                        <label>Select Model:</label>
+                        <select id="batchModel">
+                            <option value="">Select a loaded model...</option>
+                        </select>
+                    </div>
+                    <div class="parameters-grid">
+                        <div class="input-group">
+                            <label>Max Length:</label>
+                            <input type="number" id="batchMaxLength" value="80" min="10" max="200">
+                        </div>
+                        <div class="input-group">
+                            <label>Temperature:</label>
+                            <input type="number" id="batchTemperature" value="0.7" min="0.1" max="2.0" step="0.1">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="inference-section">
+                <h3>Batch Prompts</h3>
+                <div class="batch-input-section">
+                    <div id="batchPrompts">
+                        <div class="prompt-input">
+                            <input type="text" placeholder="Enter prompt..." value="What is artificial intelligence?">
+                            <button onclick="removePrompt(this)">Remove</button>
+                        </div>
+                        <div class="prompt-input">
+                            <input type="text" placeholder="Enter prompt..." value="Explain machine learning in simple terms.">
+                            <button onclick="removePrompt(this)">Remove</button>
+                        </div>
+                        <div class="prompt-input">
+                            <input type="text" placeholder="Enter prompt..." value="What are the benefits of renewable energy?">
+                            <button onclick="removePrompt(this)">Remove</button>
+                        </div>
+                    </div>
+                    <button class="btn btn-success" onclick="addPrompt()">Add Prompt</button>
+                    <button class="btn" onclick="processBatch()" id="batchBtn">Process Batch</button>
+                </div>
+                
+                <div class="output-section">
+                    <label>Batch Results:</label>
+                    <div id="batchOutput" class="output-box">Ready for batch processing...</div>
+                    <div class="metrics" id="batchMetrics" style="display: none;">
+                        <div class="metric">
+                            <div class="metric-value" id="batchTime">--</div>
+                            <div class="metric-label">Total Time (s)</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value" id="batchCount">--</div>
+                            <div class="metric-label">Prompts Processed</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value" id="avgTime">--</div>
+                            <div class="metric-label">Avg Time/Prompt (s)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Comparison Tab -->
+        <div id="comparison" class="tab-content">
+            <div class="model-section">
+                <div class="model-card">
+                    <h3>Comparison Setup</h3>
+                    <div class="input-group">
+                        <label>Test Prompt:</label>
+                        <textarea id="comparisonPrompt" rows="3">Tell me a story about space exploration.</textarea>
+                    </div>
+                    <div class="input-group">
+                        <label>Select Models to Compare:</label>
+                        <div id="modelCheckboxes">
+                            <!-- Checkboxes for loaded models will appear here -->
+                        </div>
+                    </div>
+                    <button class="btn" onclick="runComparison()" id="compareBtn">Run Comparison</button>
+                </div>
+            </div>
+            
+            <div class="comparison-grid" id="comparisonResults">
+                <!-- Comparison results will appear here -->
             </div>
         </div>
     </div>
 
     <script>
-        // Configuration
-        const INFERENCE_API = 'http://localhost:8000';
-        const MODEL_MANAGER_API = 'http://localhost:8001';
-
-        // Global state
         let currentEventSource = null;
-        let models = [];
-        let selectedModel = null;
-        let generationMetrics = {
-            startTime: null,
-            firstTokenTime: null,
-            tokenCount: 0
-        };
-
-        // Tab management
+        let streamStartTime = null;
+        let streamTokenCount = 0;
+        
+        // Initialize app
+        document.addEventListener('DOMContentLoaded', function() {
+            checkBackendStatus();
+            loadAvailableModels();
+            loadLoadedModels();
+            setInterval(updateStatus, 5000); // Update status every 5 seconds
+        });
+        
         function showTab(tabName) {
-            // Hide all tabs
-            document.querySelectorAll('.tab-content').forEach(tab => {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // Remove active class from all tabs
+            document.querySelectorAll('.tab').forEach(tab => {
                 tab.classList.remove('active');
             });
-            document.querySelectorAll('.tab-button').forEach(btn => {
-                btn.classList.remove('active');
-            });
-
-            // Show selected tab
-            document.getElementById(tabName + 'Tab').classList.add('active');
+            
+            // Show selected tab content
+            document.getElementById(tabName).classList.add('active');
+            
+            // Add active class to clicked tab
             event.target.classList.add('active');
-
-            // Load data if needed
-            if (tabName === 'models') {
-                loadModels();
-            } else if (tabName === 'inference') {
-                checkInferenceReady();
+            
+            // Load model dropdowns when switching tabs
+            if (tabName !== 'models') {
+                updateModelDropdowns();
             }
         }
-
-        // Service health checks
-        async function checkServices() {
-            await checkInferenceService();
-            await checkModelManagerService();
-        }
-
-        async function checkInferenceService() {
-            const statusEl = document.getElementById('inferenceStatus');
+        
+        async function checkBackendStatus() {
             try {
-                const response = await fetch(`${INFERENCE_API}/health`);
+                const response = await fetch('http://localhost:8001/health');
                 if (response.ok) {
-                    statusEl.className = 'status connected';
-                    statusEl.innerHTML = '<div class="status-indicator"></div>Inference: Online';
+                    document.getElementById('backendStatus').classList.remove('error');
+                    document.getElementById('backendStatusText').textContent = 'Connected';
                 } else {
-                    throw new Error('Service unhealthy');
+                    throw new Error('Backend not responding');
                 }
             } catch (error) {
-                statusEl.className = 'status disconnected';
-                statusEl.innerHTML = '<div class="status-indicator"></div>Inference: Offline';
+                document.getElementById('backendStatus').classList.add('error');
+                document.getElementById('backendStatusText').textContent = 'Disconnected';
             }
         }
-
-        async function checkModelManagerService() {
-            const statusEl = document.getElementById('modelManagerStatus');
+        
+        async function updateStatus() {
+            await checkBackendStatus();
+            await loadLoadedModels();
+            
             try {
-                const response = await fetch(`${MODEL_MANAGER_API}/health`);
+                const response = await fetch('http://localhost:8001/system/stats');
                 if (response.ok) {
-                    statusEl.className = 'status connected';
-                    statusEl.innerHTML = '<div class="status-indicator"></div>Model Manager: Online';
-                } else {
-                    throw new Error('Service unhealthy');
+                    const stats = await response.json();
+                    document.getElementById('memoryUsage').textContent = stats.memory.percentage;
                 }
             } catch (error) {
-                statusEl.className = 'status disconnected';
-                statusEl.innerHTML = '<div class="status-indicator"></div>Model Manager: Offline';
+                console.error('Failed to get system stats:', error);
             }
         }
-
-        // Model management
-        async function loadModels() {
+        
+        async function loadAvailableModels() {
             try {
-                const response = await fetch(`${MODEL_MANAGER_API}/models`);
+                const response = await fetch('http://localhost:8001/models/available');
                 const data = await response.json();
                 
-                if (data.success) {
-                    models = data.data.models;
-                    renderModels();
-                } else {
-                    throw new Error(data.error);
-                }
-            } catch (error) {
-                document.getElementById('modelsList').innerHTML = `
-                    <div class="alert error">
-                        Failed to load models: ${error.message}
-                    </div>
-                `;
-            }
-        }
-
-        function renderModels() {
-            const container = document.getElementById('modelsList');
-            
-            if (models.length === 0) {
-                container.innerHTML = `
-                    <div class="alert warning">
-                        No models loaded. Search and add models from HuggingFace Hub.
-                    </div>
-                `;
-                return;
-            }
-
-            container.innerHTML = models.map(model => `
-                <div class="model-card ${model.status} ${selectedModel?.model_id === model.model_id ? 'selected' : ''}" 
-                     onclick="selectModel('${model.model_id}')">
-                    <div class="model-header">
-                        <div>
-                            <div class="model-title">${model.display_name}</div>
-                            <div class="model-description">${model.description}</div>
+                const container = document.getElementById('availableModels');
+                container.innerHTML = '';
+                
+                data.available_models.forEach(model => {
+                    const modelDiv = document.createElement('div');
+                    modelDiv.className = 'available-model';
+                    modelDiv.innerHTML = `
+                        <div class="model-info">
+                            <h4>${model.model_id}</h4>
+                            <p>${model.description}</p>
+                            <p><strong>Size:</strong> ${model.size}</p>
+                            <p><strong>Type:</strong> ${model.type}</p>
+                            <div class="model-badges">
+                                ${model.capabilities.map(cap => `<span class="badge">${cap}</span>`).join('')}
+                            </div>
                         </div>
-                        <div class="status ${model.status}">
-                            ${model.status === 'loading' ? '<div class="loading-spinner"></div>' : ''}
-                            ${model.status}
-                        </div>
-                    </div>
-                    
-                    ${model.status === 'loading' && model.progress ? `
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: ${model.progress}%"></div>
-                        </div>
-                    ` : ''}
-                    
-                    <div class="model-meta">
-                        <span>Source: ${model.source}</span>
-                        ${model.size_mb ? `<span>Size: ${model.size_mb.toFixed(1)} MB</span>` : ''}
-                        <span>Added: ${new Date(model.created_at).toLocaleDateString()}</span>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        async function selectModel(modelId) {
-            selectedModel = models.find(m => m.model_id === modelId);
-            renderModels(); // Re-render to show selection
-            showModelDetails(selectedModel);
-            
-            // Update inference tab
-            if (selectedModel.status === 'available') {
-                document.getElementById('currentModel').textContent = selectedModel.display_name;
-                document.getElementById('noModelAlert').style.display = 'none';
-            }
-        }
-
-        function showModelDetails(model) {
-            const container = document.getElementById('modelDetails');
-            
-            if (!model) {
-                container.innerHTML = '<p style="color: #718096; text-align: center; margin-top: 100px;">Select a model to view details</p>';
-                return;
-            }
-
-            container.innerHTML = `
-                <div style="margin-bottom: 20px;">
-                    <h4 style="margin-bottom: 10px;">${model.display_name}</h4>
-                    <p style="color: #4a5568; margin-bottom: 15px;">${model.description}</p>
-                </div>
-
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-                    <div><strong>Status:</strong> <span class="status ${model.status}">${model.status}</span></div>
-                    <div><strong>Source:</strong> ${model.source}</div>
-                    <div><strong>Model ID:</strong> ${model.model_id}</div>
-                    ${model.size_mb ? `<div><strong>Size:</strong> ${model.size_mb.toFixed(1)} MB</div>` : ''}
-                </div>
-
-                ${model.tags && model.tags.length > 0 ? `
-                    <div style="margin-bottom: 20px;">
-                        <strong>Tags:</strong> ${model.tags.map(tag => `<span style="background: #e2e8f0; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-right: 5px;">${tag}</span>`).join('')}
-                    </div>
-                ` : ''}
-
-                ${model.error_message ? `
-                    <div class="alert error">
-                        <strong>Error:</strong> ${model.error_message}
-                    </div>
-                ` : ''}
-
-                <div style="display: flex; gap: 10px; margin-top: 20px;">
-                    ${model.status === 'available' ? `
-                        <button class="btn btn-small" onclick="useModel('${model.model_id}')">Use for Inference</button>
-                    ` : ''}
-                    ${model.status === 'error' ? `
-                        <button class="btn btn-small" onclick="reloadModel('${model.model_id}')">Retry Load</button>
-                    ` : ''}
-                    <button class="btn btn-danger btn-small" onclick="deleteModel('${model.model_id}')">Delete</button>
-                </div>
-            `;
-        }
-
-        async function useModel(modelId) {
-            showTab('inference');
-            // The tab switch will handle updating the UI
-        }
-
-        async function deleteModel(modelId) {
-            if (!confirm(`Are you sure you want to delete model ${modelId}?`)) return;
-
-            try {
-                const response = await fetch(`${MODEL_MANAGER_API}/models/${encodeURIComponent(modelId)}`, {
-                    method: 'DELETE'
+                        <button class="btn" onclick="loadModel('${model.model_id}')" id="load-${model.model_id.replace(/[^a-zA-Z0-9]/g, '-')}">
+                            Load Model
+                        </button>
+                    `;
+                    container.appendChild(modelDiv);
                 });
-                const data = await response.json();
-                
-                if (data.success) {
-                    await loadModels();
-                    if (selectedModel?.model_id === modelId) {
-                        selectedModel = null;
-                        showModelDetails(null);
-                    }
-                } else {
-                    alert(`Failed to delete model: ${data.error}`);
-                }
             } catch (error) {
-                alert(`Failed to delete model: ${error.message}`);
+                console.error('Failed to load available models:', error);
             }
         }
-
-        async function reloadModel(modelId) {
-            const model = models.find(m => m.model_id === modelId);
-            if (!model) return;
-
-            const modelConfig = {
-                model_id: model.model_id,
-                source: model.source,
-                display_name: model.display_name,
-                description: model.description,
-                parameters: model.parameters || {},
-                tags: model.tags || []
-            };
-
+        
+        async function loadLoadedModels() {
             try {
-                const response = await fetch(`${MODEL_MANAGER_API}/models/load`, {
+                const response = await fetch('http://localhost:8001/models/loaded');
+                const data = await response.json();
+                
+                document.getElementById('loadedModelsCount').textContent = data.loaded_models.length;
+                
+                const container = document.getElementById('loadedModels');
+                container.innerHTML = '';
+                
+                data.loaded_models.forEach(model => {
+                    const modelDiv = document.createElement('div');
+                    modelDiv.className = 'available-model loaded';
+                    modelDiv.innerHTML = `
+                        <div class="model-info">
+                            <h4>${model.model_id}</h4>
+                            <p><strong>Status:</strong> ${model.status}</p>
+                            <p><strong>Memory:</strong> ${model.memory_usage}</p>
+                            <p><strong>Device:</strong> ${model.device}</p>
+                            <p><strong>Loaded:</strong> ${new Date(model.load_time).toLocaleTimeString()}</p>
+                        </div>
+                        <button class="btn btn-danger" onclick="unloadModel('${model.model_id}')">
+                            Unload Model
+                        </button>
+                    `;
+                    container.appendChild(modelDiv);
+                });
+                
+                // Update available model buttons
+                data.loaded_models.forEach(model => {
+                    const loadBtn = document.getElementById(`load-${model.model_id.replace(/[^a-zA-Z0-9]/g, '-')}`);
+                    if (loadBtn) {
+                        loadBtn.textContent = 'Loaded';
+                        loadBtn.disabled = true;
+                        loadBtn.parentElement.classList.add('loaded');
+                    }
+                });
+                
+            } catch (error) {
+                console.error('Failed to load loaded models:', error);
+            }
+        }
+        
+        async function updateModelDropdowns() {
+            try {
+                const response = await fetch('http://localhost:8001/models/loaded');
+                const data = await response.json();
+                
+                const dropdowns = ['inferenceModel', 'streamingModel', 'batchModel'];
+                dropdowns.forEach(dropdownId => {
+                    const dropdown = document.getElementById(dropdownId);
+                    if (dropdown) {
+                        const currentValue = dropdown.value;
+                        dropdown.innerHTML = '<option value="">Select a loaded model...</option>';
+                        
+                        data.loaded_models.forEach(model => {
+                            const option = document.createElement('option');
+                            option.value = model.model_id;
+                            option.textContent = `${model.model_id} (${model.device})`;
+                            dropdown.appendChild(option);
+                        });
+                        
+                        if (currentValue && data.loaded_models.some(m => m.model_id === currentValue)) {
+                            dropdown.value = currentValue;
+                        }
+                    }
+                });
+                
+                // Update comparison checkboxes
+                const checkboxContainer = document.getElementById('modelCheckboxes');
+                if (checkboxContainer) {
+                    checkboxContainer.innerHTML = '';
+                    data.loaded_models.forEach(model => {
+                        const label = document.createElement('label');
+                        label.innerHTML = `
+                            <input type="checkbox" value="${model.model_id}"> 
+                            ${model.model_id} (${model.device})
+                        `;
+                        label.style.display = 'block';
+                        label.style.marginBottom = '10px';
+                        checkboxContainer.appendChild(label);
+                    });
+                }
+                
+            } catch (error) {
+                console.error('Failed to update model dropdowns:', error);
+            }
+        }
+        
+        async function loadModel(modelId) {
+            const button = document.getElementById(`load-${modelId.replace(/[^a-zA-Z0-9]/g, '-')}`);
+            const originalText = button.textContent;
+            button.innerHTML = '<span class="loading"></span>Loading...';
+            button.disabled = true;
+            
+            try {
+                const response = await fetch('http://localhost:8001/models/load', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
                     body: JSON.stringify({
-                        model_config: modelConfig,
-                        force_reload: true
+                        model_id: modelId
                     })
                 });
                 
-                const data = await response.json();
-                if (data.success) {
-                    // Start polling for progress
-                    pollModelProgress(modelId);
+                const result = await response.json();
+                
+                if (response.ok) {
+                    button.textContent = 'Loaded';
+                    button.parentElement.classList.add('loaded');
+                    await loadLoadedModels();
+                    updateModelDropdowns();
                 } else {
-                    alert(`Failed to reload model: ${data.error}`);
+                    button.textContent = originalText;
+                    button.disabled = false;
+                    alert('Failed to load model: ' + result.detail);
                 }
             } catch (error) {
-                alert(`Failed to reload model: ${error.message}`);
+                button.textContent = originalText;
+                button.disabled = false;
+                alert('Error loading model: ' + error.message);
             }
         }
-
-        // Model search functionality
-        async function searchModels() {
-            const query = document.getElementById('searchQuery').value.trim();
-            if (!query) {
-                alert('Please enter a search query');
-                return;
-            }
-
-            const resultsContainer = document.getElementById('searchResults');
-            resultsContainer.innerHTML = '<div class="alert">Searching models...</div>';
-
-            try {
-                const response = await fetch(`${MODEL_MANAGER_API}/models/search/${encodeURIComponent(query)}`);
-                const data = await response.json();
-
-                if (data.success && data.data.results.length > 0) {
-                    resultsContainer.innerHTML = data.data.results.map(model => `
-                        <div class="search-result" onclick="selectSearchResult('${model.id}', '${model.display_name}', '${model.description}')">
-                            <div style="font-weight: 600; margin-bottom: 5px;">${model.display_name}</div>
-                            <div style="font-size: 12px; color: #4a5568; margin-bottom: 8px;">${model.description}</div>
-                            <div style="display: flex; gap: 10px; font-size: 11px; color: #718096;">
-                                <span>Downloads: ${model.downloads?.toLocaleString() || 'N/A'}</span>
-                                <span>Tags: ${model.tags?.slice(0, 3).join(', ') || 'None'}</span>
-                            </div>
-                        </div>
-                    `).join('');
-                } else {
-                    resultsContainer.innerHTML = '<div class="alert warning">No models found for your query.</div>';
-                }
-            } catch (error) {
-                resultsContainer.innerHTML = `<div class="alert error">Search failed: ${error.message}</div>`;
-            }
-        }
-
-        function selectSearchResult(modelId, displayName, description) {
-            document.getElementById('modelId').value = modelId;
-            document.getElementById('displayName').value = displayName;
-            document.getElementById('description').value = description;
-            showAddModelModal();
-        }
-
-        // Modal management
-        function showAddModelModal() {
-            document.getElementById('addModelModal').style.display = 'block';
-        }
-
-        function closeModal() {
-            document.getElementById('addModelModal').style.display = 'none';
-            // Clear form
-            document.getElementById('modelId').value = '';
-            document.getElementById('displayName').value = '';
-            document.getElementById('description').value = '';
-            document.getElementById('apiEndpoint').value = '';
-            document.getElementById('apiKey').value = '';
-            document.getElementById('modelSource').value = 'huggingface';
-            toggleSourceFields();
-        }
-
-        function toggleSourceFields() {
-            const source = document.getElementById('modelSource').value;
-            const apiFields = document.getElementById('apiFields');
-            apiFields.style.display = source === 'api' ? 'block' : 'none';
-        }
-
-        async function addModel() {
-            const modelId = document.getElementById('modelId').value.trim();
-            const source = document.getElementById('modelSource').value;
-            const displayName = document.getElementById('displayName').value.trim();
-            const description = document.getElementById('description').value.trim();
-            const apiEndpoint = document.getElementById('apiEndpoint').value.trim();
-            const apiKey = document.getElementById('apiKey').value.trim();
-
-            if (!modelId) {
-                alert('Model ID is required');
-                return;
-            }
-
-            if (source === 'api' && !apiEndpoint) {
-                alert('API endpoint is required for API models');
-                return;
-            }
-
-            const modelConfig = {
-                model_id: modelId,
-                source: source,
-                display_name: displayName || modelId,
-                description: description || `${source} model: ${modelId}`,
-                parameters: {},
-                tags: [source]
-            };
-
-            if (source === 'api') {
-                modelConfig.api_endpoint = apiEndpoint;
-                if (apiKey) modelConfig.api_key = apiKey;
-            }
-
-            try {
-                const response = await fetch(`${MODEL_MANAGER_API}/models/load`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ model_config: modelConfig })
-                });
-
-                const data = await response.json();
-                if (data.success) {
-                    closeModal();
-                    await loadModels();
-                    // Start polling for progress
-                    pollModelProgress(modelId);
-                } else {
-                    alert(`Failed to add model: ${data.error}`);
-                }
-            } catch (error) {
-                alert(`Failed to add model: ${error.message}`);
-            }
-        }
-
-        async function pollModelProgress(modelId) {
-            const pollInterval = setInterval(async () => {
-                try {
-                    const response = await fetch(`${MODEL_MANAGER_API}/models/${encodeURIComponent(modelId)}/progress`);
-                    const data = await response.json();
-                    
-                    if (data.success) {
-                        const progress = data.data.progress;
-                        
-                        // Update model in local array
-                        const modelIndex = models.findIndex(m => m.model_id === modelId);
-                        if (modelIndex !== -1) {
-                            models[modelIndex].progress = progress;
-                            if (progress >= 100 || data.data.status === 'available') {
-                                models[modelIndex].status = 'available';
-                                clearInterval(pollInterval);
-                            }
-                            renderModels();
-                            if (selectedModel?.model_id === modelId) {
-                                showModelDetails(models[modelIndex]);
-                            }
-                        }
-                    } else {
-                        clearInterval(pollInterval);
-                    }
-                } catch (error) {
-                    console.error('Progress polling failed:', error);
-                    clearInterval(pollInterval);
-                }
-            }, 2000); // Poll every 2 seconds
-
-            // Stop polling after 10 minutes max
-            setTimeout(() => clearInterval(pollInterval), 600000);
-        }
-
-        // Inference functionality
-        function checkInferenceReady() {
-            const hasAvailableModel = models.some(m => m.status === 'available');
-            const alertEl = document.getElementById('noModelAlert');
+        
+        async function unloadModel(modelId) {
+            if (!confirm(`Are you sure you want to unload ${modelId}?`)) return;
             
-            if (!hasAvailableModel) {
-                alertEl.style.display = 'block';
-            } else {
-                alertEl.style.display = 'none';
-                if (!selectedModel || selectedModel.status !== 'available') {
-                    // Auto-select first available model
-                    const availableModel = models.find(m => m.status === 'available');
-                    if (availableModel) {
-                        selectedModel = availableModel;
-                        document.getElementById('currentModel').textContent = availableModel.display_name;
-                    }
+            try {
+                const response = await fetch(`http://localhost:8001/models/unload/${modelId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    await loadLoadedModels();
+                    await loadAvailableModels();
+                    updateModelDropdowns();
+                } else {
+                    const result = await response.json();
+                    alert('Failed to unload model: ' + result.detail);
                 }
+            } catch (error) {
+                alert('Error unloading model: ' + error.message);
             }
         }
-
+        
         async function generateText() {
-            if (!selectedModel || selectedModel.status !== 'available') {
-                alert('Please load a model first from the Model Management tab');
-                return;
-            }
-
-            const prompt = document.getElementById('prompt').value.trim();
-            if (!prompt) {
-                alert('Please enter a prompt');
-                return;
-            }
-
-            // Reset metrics
-            generationMetrics = {
-                startTime: Date.now(),
-                firstTokenTime: null,
-                tokenCount: 0
-            };
-
-            const generateBtn = document.getElementById('generateBtn');
-            const outputEl = document.getElementById('output');
-            const metricsEl = document.getElementById('metrics');
-            const statusEl = document.getElementById('generationStatus');
-
-            generateBtn.disabled = true;
-            generateBtn.innerHTML = 'Generating... <div class="loading-spinner"></div>';
-            metricsEl.style.display = 'flex';
-
-            const maxTokens = parseInt(document.getElementById('maxTokens').value);
+            const modelId = document.getElementById('inferenceModel').value;
+            const prompt = document.getElementById('prompt').value;
+            const maxLength = parseInt(document.getElementById('maxLength').value);
             const temperature = parseFloat(document.getElementById('temperature').value);
-            const topK = parseInt(document.getElementById('topK').value);
             const topP = parseFloat(document.getElementById('topP').value);
-            const endpoint = document.getElementById('endpoint').value;
-
-            if (endpoint === '/v1/generate') {
-                // SSE Streaming
-                statusEl.className = 'status loading';
-                statusEl.innerHTML = '<div class="loading-spinner"></div>Streaming';
-                outputEl.textContent = '';
-
-                try {
-                    const params = new URLSearchParams({
+            
+            if (!modelId) {
+                alert('Please select a model first');
+                return;
+            }
+            
+            const button = document.getElementById('generateBtn');
+            button.innerHTML = '<span class="loading"></span>Generating...';
+            button.disabled = true;
+            
+            const output = document.getElementById('output');
+            output.textContent = 'Generating...';
+            
+            const startTime = Date.now();
+            
+            try {
+                const response = await fetch('http://localhost:8001/models/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        model_id: modelId,
                         prompt: prompt,
-                        max_new_tokens: maxTokens.toString(),
-                        temperature: temperature.toString(),
-                        top_k: topK.toString(),
-                        top_p: topP.toString()
-                    });
-
-                    currentEventSource = new EventSource(`${INFERENCE_API}${endpoint}?${params}`);
-
-                    currentEventSource.onopen = function() {
-                        statusEl.className = 'status connected';
-                        statusEl.innerHTML = '<div class="status-indicator"></div>Streaming';
-                    };
-
-                    currentEventSource.onmessage = function(event) {
-                        if (!generationMetrics.firstTokenTime) {
-                            generationMetrics.firstTokenTime = Date.now();
-                        }
-                        
-                        const token = event.data;
-                        if (token && token !== '[DONE]') {
-                            outputEl.textContent += token;
-                            generationMetrics.tokenCount++;
-                            updateMetrics();
-                        }
-                    };
-
-                    currentEventSource.addEventListener('done', function() {
-                        statusEl.className = 'status disconnected';
-                        statusEl.textContent = 'Complete';
-                        currentEventSource.close();
-                        currentEventSource = null;
-                        generateBtn.disabled = false;
-                        generateBtn.textContent = 'Generate Text';
-                    });
-
-                    currentEventSource.onerror = function() {
-                        statusEl.className = 'status disconnected';
-                        statusEl.textContent = 'Error';
-                        outputEl.textContent = 'Error connecting to inference server. Please check if TorchWeave is running.';
-                        currentEventSource.close();
-                        currentEventSource = null;
-                        generateBtn.disabled = false;
-                        generateBtn.textContent = 'Generate Text';
-                    };
-
-                } catch (error) {
-                    statusEl.className = 'status disconnected';
-                    statusEl.textContent = 'Error';
-                    outputEl.textContent = 'Error: ' + error.message;
-                    generateBtn.disabled = false;
-                    generateBtn.textContent = 'Generate Text';
+                        max_length: maxLength,
+                        temperature: temperature,
+                        top_p: topP
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    output.textContent = `Prompt: ${prompt}\n\nGenerated: ${result.generated_text}`;
+                    
+                    // Show metrics
+                    document.getElementById('batchMetrics').style.display = 'block';
+                    document.getElementById('batchTime').textContent = result.processing_time.toFixed(2);
+                    document.getElementById('batchCount').textContent = result.batch_size;
+                    document.getElementById('avgTime').textContent = result.avg_time_per_prompt.toFixed(2);
+                } else {
+                    output.textContent = 'Error: ' + result.detail;
                 }
-            } else {
-                // Standard API
-                statusEl.className = 'status loading';
-                statusEl.innerHTML = '<div class="loading-spinner"></div>Processing';
-
+            } catch (error) {
+                output.textContent = 'Error: ' + error.message;
+            } finally {
+                button.textContent = 'Process Batch';
+                button.disabled = false;
+            }
+        }
+        
+        async function runComparison() {
+            const prompt = document.getElementById('comparisonPrompt').value;
+            const checkboxes = document.querySelectorAll('#modelCheckboxes input[type="checkbox"]:checked');
+            const selectedModels = Array.from(checkboxes).map(cb => cb.value);
+            
+            if (selectedModels.length < 2) {
+                alert('Please select at least 2 models to compare');
+                return;
+            }
+            
+            const button = document.getElementById('compareBtn');
+            button.innerHTML = '<span class="loading"></span>Running Comparison...';
+            button.disabled = true;
+            
+            const resultsContainer = document.getElementById('comparisonResults');
+            resultsContainer.innerHTML = '';
+            
+            // Run inference for each selected model
+            const results = [];
+            for (const modelId of selectedModels) {
+                const resultBox = document.createElement('div');
+                resultBox.className = 'comparison-box';
+                resultBox.innerHTML = `
+                    <h3>${modelId}</h3>
+                    <div class="loading"></div>
+                    <p>Processing...</p>
+                `;
+                resultsContainer.appendChild(resultBox);
+                
                 try {
-                    const response = await fetch(`${INFERENCE_API}${endpoint}`, {
+                    const startTime = Date.now();
+                    
+                    const response = await fetch('http://localhost:8001/models/generate', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
                         body: JSON.stringify({
+                            model_id: modelId,
                             prompt: prompt,
-                            max_new_tokens: maxTokens,
-                            temperature: temperature,
-                            top_k: topK,
-                            top_p: topP
+                            max_length: 100,
+                            temperature: 0.7
                         })
                     });
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                    }
-
-                    const data = await response.json();
-                    generationMetrics.firstTokenTime = Date.now();
-                    generationMetrics.tokenCount = data.text ? data.text.split(/\s+/).length : 0;
                     
-                    outputEl.textContent = data.text || 'No response received';
-                    statusEl.className = 'status disconnected';
-                    statusEl.textContent = 'Complete';
-                    updateMetrics();
-
+                    const result = await response.json();
+                    const endTime = Date.now();
+                    
+                    if (response.ok) {
+                        const tokenCount = result.generated_text.split(' ').length;
+                        const processingTime = result.processing_time;
+                        
+                        resultBox.innerHTML = `
+                            <h3>${modelId}</h3>
+                            <div class="output-box" style="max-height: 200px; margin-bottom: 15px;">
+                                <strong>Prompt:</strong> ${prompt}
+                                
+                                <strong>Response:</strong> ${result.generated_text}
+                            </div>
+                            <div class="metrics">
+                                <div class="metric">
+                                    <div class="metric-value">${processingTime.toFixed(2)}</div>
+                                    <div class="metric-label">Time (s)</div>
+                                </div>
+                                <div class="metric">
+                                    <div class="metric-value">${tokenCount}</div>
+                                    <div class="metric-label">Tokens</div>
+                                </div>
+                                <div class="metric">
+                                    <div class="metric-value">${(tokenCount / processingTime).toFixed(1)}</div>
+                                    <div class="metric-label">Tokens/sec</div>
+                                </div>
+                            </div>
+                        `;
+                        
+                        results.push({
+                            modelId,
+                            processingTime,
+                            tokenCount,
+                            tokensPerSec: tokenCount / processingTime,
+                            response: result.generated_text
+                        });
+                    } else {
+                        resultBox.innerHTML = `
+                            <h3>${modelId}</h3>
+                            <div style="color: red;">Error: ${result.detail}</div>
+                        `;
+                    }
                 } catch (error) {
-                    statusEl.className = 'status disconnected';
-                    statusEl.textContent = 'Error';
-                    outputEl.textContent = `Error: ${error.message}\n\nPlease ensure TorchWeave inference server is running.`;
+                    resultBox.innerHTML = `
+                        <h3>${modelId}</h3>
+                        <div style="color: red;">Error: ${error.message}</div>
+                    `;
                 }
-
-                generateBtn.disabled = false;
-                generateBtn.textContent = 'Generate Text';
+            }
+            
+            // Add summary comparison
+            if (results.length > 1) {
+                const summaryBox = document.createElement('div');
+                summaryBox.className = 'comparison-box';
+                summaryBox.style.gridColumn = '1 / -1';
+                
+                const fastestModel = results.reduce((prev, current) => 
+                    (prev.processingTime < current.processingTime) ? prev : current
+                );
+                
+                const highestThroughput = results.reduce((prev, current) => 
+                    (prev.tokensPerSec > current.tokensPerSec) ? prev : current
+                );
+                
+                summaryBox.innerHTML = `
+                    <h3>📊 Comparison Summary</h3>
+                    <div class="metrics">
+                        <div class="metric">
+                            <div class="metric-value">${fastestModel.modelId}</div>
+                            <div class="metric-label">Fastest Model</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value">${highestThroughput.modelId}</div>
+                            <div class="metric-label">Highest Throughput</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value">${(results.reduce((sum, r) => sum + r.processingTime, 0) / results.length).toFixed(2)}s</div>
+                            <div class="metric-label">Avg Processing Time</div>
+                        </div>
+                    </div>
+                `;
+                
+                resultsContainer.appendChild(summaryBox);
+            }
+            
+            button.textContent = 'Run Comparison';
+            button.disabled = false;
+        }
+    </script>
+</body>
+</html>
+                    document.getElementById('inferenceMetrics').style.display = 'block';
+                    document.getElementById('inferenceTime').textContent = result.processing_time.toFixed(2);
+                    document.getElementById('tokenCount').textContent = result.generated_text.split(' ').length;
+                } else {
+                    output.textContent = 'Error: ' + result.detail;
+                }
+            } catch (error) {
+                output.textContent = 'Error: ' + error.message;
+            } finally {
+                button.textContent = 'Generate Text';
+                button.disabled = false;
             }
         }
-
-        function updateMetrics() {
-            if (!generationMetrics.startTime) return;
-
-            const now = Date.now();
-            const ttft = generationMetrics.firstTokenTime ? 
-                generationMetrics.firstTokenTime - generationMetrics.startTime : null;
-            const elapsed = (now - generationMetrics.startTime) / 1000;
-            const tokensPerSec = elapsed > 0 ? (generationMetrics.tokenCount / elapsed).toFixed(2) : '0';
-
-            document.getElementById('ttft').textContent = ttft ? `${ttft}` : '-';
-            document.getElementById('tokenCount').textContent = generationMetrics.tokenCount;
-            document.getElementById('tokensPerSec').textContent = tokensPerSec;
+        
+        async function startStreaming() {
+            const modelId = document.getElementById('streamingModel').value;
+            const prompt = document.getElementById('streamPrompt').value;
+            const maxLength = parseInt(document.getElementById('streamMaxLength').value);
+            const temperature = parseFloat(document.getElementById('streamTemperature').value);
+            
+            if (!modelId) {
+                alert('Please select a model first');
+                return;
+            }
+            
+            // Reset UI
+            document.getElementById('streamBtn').style.display = 'none';
+            document.getElementById('stopStreamBtn').style.display = 'inline-block';
+            document.getElementById('streamingIndicator').style.display = 'inline';
+            
+            const output = document.getElementById('streamOutput');
+            output.textContent = '';
+            
+            streamStartTime = Date.now();
+            streamTokenCount = 0;
+            
+            try {
+                // Create EventSource for SSE
+                const eventSource = new EventSource(`http://localhost:8001/models/generate/stream?model_id=${encodeURIComponent(modelId)}&prompt=${encodeURIComponent(prompt)}&max_length=${maxLength}&temperature=${temperature}`);
+                currentEventSource = eventSource;
+                
+                eventSource.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'token') {
+                        output.textContent += data.content;
+                        streamTokenCount++;
+                        
+                        // Update metrics in real-time
+                        const elapsed = (Date.now() - streamStartTime) / 1000;
+                        document.getElementById('streamingMetrics').style.display = 'block';
+                        document.getElementById('streamTime').textContent = elapsed.toFixed(1);
+                        document.getElementById('streamTokens').textContent = streamTokenCount;
+                        document.getElementById('streamSpeed').textContent = (streamTokenCount / elapsed).toFixed(1);
+                        
+                        // Auto-scroll
+                        output.scrollTop = output.scrollHeight;
+                    } else if (data.type === 'complete') {
+                        stopStreaming();
+                    } else if (data.type === 'error') {
+                        output.textContent += '\n\nError: ' + data.error;
+                        stopStreaming();
+                    }
+                };
+                
+                eventSource.onerror = function(error) {
+                    console.error('SSE Error:', error);
+                    stopStreaming();
+                };
+                
+            } catch (error) {
+                alert('Error starting stream: ' + error.message);
+                stopStreaming();
+            }
         }
-
-        function clearOutput() {
-            document.getElementById('output').textContent = 'Output cleared. Ready for new generation.';
-            document.getElementById('metrics').style.display = 'none';
-            document.getElementById('generationStatus').className = 'status disconnected';
-            document.getElementById('generationStatus').textContent = 'Ready';
-
+        
+        function stopStreaming() {
             if (currentEventSource) {
                 currentEventSource.close();
                 currentEventSource = null;
             }
-
-            generationMetrics = {
-                startTime: null,
-                firstTokenTime: null,
-                tokenCount: 0
-            };
-        }
-
-        // Event listeners
-        document.getElementById('searchQuery').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                searchModels();
-            }
-        });
-
-        // Close modal when clicking outside
-        window.onclick = function(event) {
-            const modal = document.getElementById('addModelModal');
-            if (event.target == modal) {
-                closeModal();
-            }
-        }
-
-        // Initialize application
-        async function initialize() {
-            await checkServices();
-            await loadModels();
             
-            // Set up periodic health checks
-            setInterval(checkServices, 30000); // Check every 30 seconds
-            
-            // Auto-refresh models every 5 minutes
-            setInterval(loadModels, 300000);
+            document.getElementById('streamBtn').style.display = 'inline-block';
+            document.getElementById('stopStreamBtn').style.display = 'none';
+            document.getElementById('streamingIndicator').style.display = 'none';
         }
-
-        // Start the application
-        initialize();
-    </script>
-</body>
-</html>
+        
+        function addPrompt() {
+            const container = document.getElementById('batchPrompts');
+            const div = document.createElement('div');
+            div.className = 'prompt-input';
+            div.innerHTML = `
+                <input type="text" placeholder="Enter prompt...">
+                <button onclick="removePrompt(this)">Remove</button>
+            `;
+            container.appendChild(div);
+        }
+        
+        function removePrompt(button) {
+            button.parentElement.remove();
+        }
+        
+        async function processBatch() {
+            const modelId = document.getElementById('batchModel').value;
+            const maxLength = parseInt(document.getElementById('batchMaxLength').value);
+            const temperature = parseFloat(document.getElementById('batchTemperature').value);
+            
+            if (!modelId) {
+                alert('Please select a model first');
+                return;
+            }
+            
+            // Get all prompts
+            const promptInputs = document.querySelectorAll('#batchPrompts input');
+            const prompts = Array.from(promptInputs).map(input => input.value).filter(p => p.trim());
+            
+            if (prompts.length === 0) {
+                alert('Please add at least one prompt');
+                return;
+            }
+            
+            const button = document.getElementById('batchBtn');
+            button.innerHTML = '<span class="loading"></span>Processing...';
+            button.disabled = true;
+            
+            const output = document.getElementById('batchOutput');
+            output.textContent = 'Processing batch...';
+            
+            try {
+                const response = await fetch('http://localhost:8001/models/generate/batch', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        model_id: modelId,
+                        prompts: prompts,
+                        max_length: maxLength,
+                        temperature: temperature
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    let outputText = 'Batch Results:\n\n';
+                    result.results.forEach((item, index) => {
+                        outputText += `${index + 1}. Prompt: "${item.prompt}"\n`;
+                        outputText += `   Response: "${item.generated_text}"\n\n`;
+                    });
+                    
+                    output.textContent = outputText;
+                    
+                    // Show metrics

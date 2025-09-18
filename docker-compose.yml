@@ -1,164 +1,83 @@
 services:
   server:
-    build: 
+    build:
       context: ./server
       dockerfile: Dockerfile
+    container_name: torchweave_server
+    working_dir: /app
+    command: >
+      uvicorn server:app
+        --host 0.0.0.0
+        --port 8000
+        --app-dir /app/server/src
+    environment:
+      - PYTHONPATH=/app:/app/server/src
+    volumes:
+      - ./server/src:/app/server/src:rw
     ports:
       - "8000:8000"
-    environment:
-      - CUDA_VISIBLE_DEVICES=0
-      - HF_MODEL=${HF_MODEL:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}
-      - MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-128}
-      - TEMPERATURE=${TEMPERATURE:-0.7}
-      - TOP_K=${TOP_K:-50}
-      - TOP_P=${TOP_P:-0.9}
-      - SEED=${SEED:-42}
-      - SCHEDULE_TICK_MS=${SCHEDULE_TICK_MS:-15}
-      - MAX_BATCH=${MAX_BATCH:-16}
-      - ARTIFACT_DIR=/artifacts
-      - ARTIFACT_MODEL_DIR=/artifacts/model
-    volumes:
-      - artifacts:/artifacts
-      - ./logs:/app/logs
-    depends_on:
-      optimizer:
-        condition: service_completed_successfully
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    profiles:
-      - gpu
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
-  server-cpu:
-    build: 
-      context: ./server
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    environment:
-      - HF_MODEL=${HF_MODEL:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}
-      - MAX_NEW_TOKENS=${MAX_NEW_TOKENS:-128}
-      - TEMPERATURE=${TEMPERATURE:-0.7}
-      - TOP_K=${TOP_K:-50}
-      - TOP_P=${TOP_P:-0.9}
-      - SEED=${SEED:-42}
-      - SCHEDULE_TICK_MS=${SCHEDULE_TICK_MS:-15}
-      - MAX_BATCH=${MAX_BATCH:-16}
-      - ARTIFACT_DIR=/artifacts
-      - ARTIFACT_MODEL_DIR=/artifacts/model
-    volumes:
-      - artifacts:/artifacts
-      - ./logs:/app/logs
-    depends_on:
-      optimizer:
-        condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-  optimizer:
-    build: 
-      context: ./optimizer
-      dockerfile: Dockerfile
-    environment:
-      - HF_MODEL=${HF_MODEL:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}
-      - ARTIFACT_DIR=/artifacts
-      - ARTIFACT_MODEL_DIR=/artifacts/model
-    volumes:
-      - artifacts:/artifacts
-
-  # Model management service - now in default profile
   model-manager:
     build:
       context: ./model-manager
       dockerfile: Dockerfile
-    ports:
-      - "8001:8001"  # Expose port for external access
+    container_name: torchweave_model_manager
+    working_dir: /app/model-manager/src
+    command: >
+      python -m uvicorn model_manager:app
+        --host 0.0.0.0
+        --port 8001
     environment:
+      - PYTHONPATH=/app:/app/model-manager/src
+      - TOKENIZERS_PARALLELISM=false
+    volumes:
+      - ./model-manager/src:/app/model-manager/src:rw
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  nginx:
+    image: nginx:alpine
+    container_name: torchweave_nginx
+    depends_on:
+      - server
+      - model-manager
+    ports:
+      - "3000:80"   # open http://localhost:3000
+    volumes:
+      - ./ui/index.html:/usr/share/nginx/html/index.html:ro
+      - ./ui/nginx.conf:/etc/nginx/conf.d/site.conf:ro
+    command: >
+      sh -lc "rm -f /etc/nginx/conf.d/default.conf &&
+              nginx -g 'daemon off;'"
+    restart: unless-stopped
+
+  optimizer:
+    build:
+      context: ./optimizer
+      dockerfile: Dockerfile
+    container_name: torchweave_optimizer
+    working_dir: /app
+    command: >
+      python -u /app/optimizer/src/optimizer.py
+    environment:
+      - HF_MODEL=${HF_MODEL:-TinyLlama/TinyLlama-1.1B-Chat-v1.0}
       - ARTIFACT_DIR=/artifacts
       - ARTIFACT_MODEL_DIR=/artifacts/model
-      - MODEL_CACHE_DIR=/model_cache
-      - HUGGINGFACE_CACHE_DIR=/model_cache/huggingface
-      - SERVER_URL=http://server-cpu:8000  # Connect to inference server
     volumes:
       - artifacts:/artifacts
-      - model-cache:/model_cache  # Persistent model cache
-    depends_on:
-      - server-cpu
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Enhanced UI service
-  ui:
-    build:
-      context: ./ui
-      dockerfile: Dockerfile
-    ports:
-      - "3000:80"
-    environment:
-      - NGINX_HOST=localhost
-      - NGINX_PORT=80
-    depends_on:
-      - server-cpu
-      - model-manager
-    profiles:
-      - ui
-
-  # Enhanced monitoring and metrics
-  prometheus:
-    image: prom/prometheus:latest
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-    profiles:
-      - monitoring
-
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3001:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./monitoring/grafana:/etc/grafana/provisioning
-    profiles:
-      - monitoring
-
-  # Redis for caching and session management
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    profiles:
-      - cache
+    restart: unless-stopped
 
 volumes:
   artifacts:
-  model-cache:  # Add persistent model cache
-  grafana-data:
-  redis-data:

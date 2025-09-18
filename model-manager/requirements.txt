@@ -1,11 +1,16 @@
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.4.2
-aiohttp==3.9.0
-transformers==4.36.0
-torch==2.1.0
-huggingface-hub==0.19.4
-requests==2.31.0
-python-multipart==0.0.6
-pydantic>=2.0.0
-fastapi>=0.100.0
+# Lean, CPU-friendly stack (no CUDA wheels)
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.3.1
+
+fastapi==0.116.2
+uvicorn==0.35.0
+
+transformers==4.56.1
+tokenizers==0.22.0
+accelerate==1.10.1
+sentencepiece==0.2.1
+
+psutil==7.0.0
+pydantic==2.11.9
+typing_extensions==4.15.0
+python-multipart==0.0.20   

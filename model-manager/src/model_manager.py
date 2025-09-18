@@ -1,571 +1,428 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Dict, List, Optional, Any, Generator
-import logging
-import asyncio
-import json
-import time
-from datetime import datetime
-import psutil
+# model_manager.py
+# FastAPI app for model management and baseline text generation.
+# Fixed to properly handle both JSON and form data and generate text correctly
+
+from __future__ import annotations
+
 import os
-import sys
-import torch
+import time
+import json
+import psutil
+import asyncio
+from typing import Dict, Any, Optional, List
+
+from fastapi import FastAPI, Request, HTTPException, Form
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
 from transformers import (
-    AutoTokenizer, 
-    AutoModelForCausalLM, 
-    AutoModelForSeq2SeqLM,
-    BlenderbotTokenizer,
-    BlenderbotForConditionalGeneration,
-    TextStreamer
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    pipeline,
+    TextIteratorStreamer,
 )
-import gc
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# ------------------------------------------------------------------------------
+# App & CORS
+# ------------------------------------------------------------------------------
+app = FastAPI(title="TorchWeave Model Manager", version="1.0.0")
 
-app = FastAPI(title="Model Manager", version="1.0.0")
-
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure this properly in production
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# In-memory storage for loaded models and tokenizers
-loaded_models: Dict[str, dict] = {}
-model_status: Dict[str, str] = {}
+DEVICE = "cpu"  # keep simple/portable; override later if you add CUDA
 
-class ModelLoadRequest(BaseModel):
+# ------------------------------------------------------------------------------
+# In-memory registry/state
+# ------------------------------------------------------------------------------
+class LoadedModel(BaseModel):
     model_id: str
-    config: Optional[dict] = None
+    status: str = "loaded"
+    memory_usage: str = "unknown"
+    load_time: str = ""
+    device: str = DEVICE
 
-class GenerateRequest(BaseModel):
-    model_id: str
-    prompt: str
-    max_length: Optional[int] = 100
-    temperature: Optional[float] = 0.7
-    do_sample: Optional[bool] = True
-    top_p: Optional[float] = 0.9
-    num_return_sequences: Optional[int] = 1
 
-class StreamGenerateRequest(BaseModel):
-    model_id: str
-    prompt: str
-    max_length: Optional[int] = 100
-    temperature: Optional[float] = 0.7
-    do_sample: Optional[bool] = True
-    top_p: Optional[float] = 0.9
+MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {}  # model_id -> {"pipe": pipeline, "tokenizer":..., "model":...}
+LOADED_MODELS: Dict[str, LoadedModel] = {}
 
-class BatchRequest(BaseModel):
-    model_id: str
-    prompts: List[str]
-    max_length: Optional[int] = 100
-    temperature: Optional[float] = 0.7
-
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Model Manager with SSE Streaming started successfully")
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(f"Using device: {device}")
-
-def get_model_info(model_id: str) -> dict:
-    """Get model configuration info"""
-    model_configs = {
-        "microsoft/DialoGPT-small": {
-            "type": "causal_lm",
-            "tokenizer_class": "AutoTokenizer",
-            "model_class": "AutoModelForCausalLM",
-            "size": "117MB"
-        },
-        "microsoft/DialoGPT-medium": {
-            "type": "causal_lm", 
-            "tokenizer_class": "AutoTokenizer",
-            "model_class": "AutoModelForCausalLM",
-            "size": "345MB"
-        },
-        "gpt2": {
-            "type": "causal_lm",
-            "tokenizer_class": "AutoTokenizer", 
-            "model_class": "AutoModelForCausalLM",
-            "size": "548MB"
-        },
-        "distilgpt2": {
-            "type": "causal_lm",
-            "tokenizer_class": "AutoTokenizer",
-            "model_class": "AutoModelForCausalLM", 
-            "size": "353MB"
-        },
-        "facebook/blenderbot_small-90M": {
-            "type": "seq2seq_lm",
-            "tokenizer_class": "BlenderbotTokenizer",
-            "model_class": "BlenderbotForConditionalGeneration",
-            "size": "356MB"
-        }
-    }
-    return model_configs.get(model_id, {
+# A simple catalog shown by /models/available
+AVAILABLE_MODELS = [
+    {
+        "model_id": "microsoft/DialoGPT-small",
+        "description": "Small conversational model - Fast inference",
+        "size": "117MB",
         "type": "causal_lm",
-        "tokenizer_class": "AutoTokenizer",
-        "model_class": "AutoModelForCausalLM",
-        "size": "Unknown"
-    })
+    },
+    {
+        "model_id": "gpt2",
+        "description": "GPT-2 base model - Creative text generation",
+        "size": "548MB",
+        "type": "causal_lm",
+    },
+    {
+        "model_id": "distilgpt2",
+        "description": "Distilled GPT-2 - Faster, smaller model",
+        "size": "353MB",
+        "type": "causal_lm",
+    },
+    {
+        "model_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+        "description": "Tiny Llama chat model - Good balance of size and performance",
+        "size": "1.1GB",
+        "type": "causal_lm",
+    },
+]
+
+# ------------------------------------------------------------------------------
+# Request/Response models
+# ------------------------------------------------------------------------------
+class LoadModelBody(BaseModel):
+    model_id: Optional[str] = Field(None, description="HF Model ID to load")
+    custom_model_id: Optional[str] = Field(
+        None, description="Alternate field used by some UIs"
+    )
+
+class GenerateBody(BaseModel):
+    model_id: Optional[str] = None
+    custom_model_id: Optional[str] = None
+    prompt: Optional[str] = None
+
+    # Sampling/length controls (JSON friendly)
+    max_length: Optional[int] = 128
+    max_new_tokens: Optional[int] = None  # preferred if provided
+    temperature: Optional[float] = 1.0
+    top_p: Optional[float] = 0.95
+    top_k: Optional[int] = 50
+    do_sample: Optional[bool] = True
+    repetition_penalty: Optional[float] = None
+    use_chat_template: Optional[bool] = False
+
+# ------------------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------------------
+def _mem_usage_str() -> str:
+    try:
+        vm = psutil.virtual_memory()
+        return f"{vm.percent:.1f}%"
+    except Exception:
+        return "unknown"
+
+def _now_iso() -> str:
+    try:
+        return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
+    except Exception:
+        return ""
+
+def _resolve_model_id(payload: dict) -> str:
+    m = (payload or {}).get("model_id") or (payload or {}).get("custom_model_id")
+    if not m:
+        raise HTTPException(status_code=400, detail="model_id or custom_model_id is required")
+    return m
+
+async def _read_payload_json_or_form(request: Request) -> dict:
+    """
+    Read JSON Body (preferred). If not JSON, try form/multipart.
+    This makes the endpoint compatible with both frontend JSON and curl -F.
+    """
+    content_type = request.headers.get("content-type", "")
+    
+    # Handle JSON requests
+    if "application/json" in content_type.lower():
+        try:
+            return await request.json()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+    
+    # Handle form data requests
+    if "multipart/form-data" in content_type.lower() or "application/x-www-form-urlencoded" in content_type.lower():
+        try:
+            form = await request.form()
+            return {k: v for k, v in form.items()}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid form data: {e}")
+    
+    # Try to read as JSON from body as fallback
+    try:
+        body = await request.body()
+        if body:
+            return json.loads(body.decode())
+        return {}
+    except Exception:
+        return {}
+
+def _build_generate_kwargs(body: GenerateBody) -> Dict[str, Any]:
+    gen_kwargs: Dict[str, Any] = {}
+
+    # Prefer max_new_tokens if provided; else fall back to max_length
+    if body.max_new_tokens is not None:
+        gen_kwargs["max_new_tokens"] = int(body.max_new_tokens)
+    elif body.max_length is not None:
+        gen_kwargs["max_length"] = int(body.max_length)
+
+    if body.temperature is not None:
+        gen_kwargs["temperature"] = float(body.temperature)
+    if body.top_p is not None:
+        gen_kwargs["top_p"] = float(body.top_p)
+    if body.top_k is not None:
+        gen_kwargs["top_k"] = int(body.top_k)
+    if body.do_sample is not None:
+        gen_kwargs["do_sample"] = bool(body.do_sample)
+    if body.repetition_penalty is not None:
+        gen_kwargs["repetition_penalty"] = float(body.repetition_penalty)
+
+    # Force text generation with reasonable defaults
+    gen_kwargs["do_sample"] = True
+    gen_kwargs["pad_token_id"] = 50256  # GPT-2 EOS token
+    gen_kwargs["eos_token_id"] = 50256
+    
+    # Ensure minimum generation
+    if "max_new_tokens" not in gen_kwargs and "max_length" not in gen_kwargs:
+        gen_kwargs["max_new_tokens"] = 50
+
+    return gen_kwargs
+
+def _ensure_pipe(model_id: str):
+    if model_id in MODEL_REGISTRY:
+        return MODEL_REGISTRY[model_id]["pipe"]
+
+    # Load tokenizer & model and cache a text-generation pipeline
+    t0 = time.time()
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+        
+    model = AutoModelForCausalLM.from_pretrained(model_id)
+    text_gen = pipeline(
+        "text-generation",
+        model=model,
+        tokenizer=tokenizer,
+        device=-1,   # CPU; change to a CUDA device id if you add GPU later
+    )
+    MODEL_REGISTRY[model_id] = {"pipe": text_gen, "tokenizer": tokenizer, "model": model}
+
+    # Update LOADED_MODELS table for /models/loaded
+    LOADED_MODELS[model_id] = LoadedModel(
+        model_id=model_id,
+        status="loaded",
+        memory_usage=_mem_usage_str(),
+        load_time=_now_iso(),
+        device=DEVICE,
+    )
+    return text_gen
+
+# ------------------------------------------------------------------------------
+# Endpoints
+# ------------------------------------------------------------------------------
 
 @app.get("/health")
-async def health_check():
-    return {"status": "ok", "service": "model-manager"}
+def health():
+    return {"status": "ok", "service": "model-manager", "port": 8001}
 
 @app.get("/models/available")
-async def get_available_models():
-    """Get list of available models that can be loaded"""
-    available_models = [
-        {
-            "model_id": "microsoft/DialoGPT-small",
-            "description": "Small conversational model - Fast inference",
-            "size": "117MB",
-            "type": "causal_lm",
-            "capabilities": ["streaming", "batch", "chat"]
-        },
-        {
-            "model_id": "microsoft/DialoGPT-medium", 
-            "description": "Medium conversational model - Better quality",
-            "size": "345MB",
-            "type": "causal_lm",
-            "capabilities": ["streaming", "batch", "chat"]
-        },
-        {
-            "model_id": "gpt2",
-            "description": "GPT-2 base model - Creative text generation",
-            "size": "548MB",
-            "type": "causal_lm",
-            "capabilities": ["streaming", "batch", "generation"]
-        },
-        {
-            "model_id": "distilgpt2",
-            "description": "Distilled GPT-2 - Faster, smaller model",
-            "size": "353MB", 
-            "type": "causal_lm",
-            "capabilities": ["streaming", "batch", "generation"]
-        },
-        {
-            "model_id": "facebook/blenderbot_small-90M",
-            "description": "Small BlenderBot - Conversational AI",
-            "size": "356MB",
-            "type": "seq2seq_lm",
-            "capabilities": ["batch", "chat"]
-        }
-    ]
-    return {"available_models": available_models}
+def models_available():
+    return {"available_models": AVAILABLE_MODELS}
 
 @app.get("/models/loaded")
-async def get_loaded_models():
-    """Get list of currently loaded models"""
-    models_list = []
-    for model_id, model_info in loaded_models.items():
-        models_list.append({
-            "model_id": model_id,
-            "status": model_status.get(model_id, "unknown"),
-            "memory_usage": model_info.get("memory_usage", "Unknown"),
-            "load_time": model_info.get("load_time", "Unknown"),
-            "type": model_info.get("type", "Unknown"),
-            "device": model_info.get("device", "Unknown")
-        })
-    return {"loaded_models": models_list}
-
-@app.post("/models/load")
-async def load_model(request: ModelLoadRequest):
-    """Load a model for real inference"""
-    model_id = request.model_id
-    
-    if not model_id:
-        raise HTTPException(status_code=400, detail="model_id is required")
-    
-    # Check if model is already loaded
-    if model_id in loaded_models:
-        return {
-            "status": "success",
-            "message": f"Model {model_id} is already loaded",
-            "model_id": model_id
-        }
-    
-    try:
-        model_status[model_id] = "loading"
-        logger.info(f"Loading model: {model_id}")
-        
-        # Get model configuration
-        model_config = get_model_info(model_id)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        # Load tokenizer
-        logger.info(f"Loading tokenizer for {model_id}")
-        if model_config["tokenizer_class"] == "BlenderbotTokenizer":
-            tokenizer = BlenderbotTokenizer.from_pretrained(model_id)
-        else:
-            tokenizer = AutoTokenizer.from_pretrained(model_id)
-            
-        # Set pad token if not exists
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        
-        # Load model
-        logger.info(f"Loading model weights for {model_id}")
-        if model_config["type"] == "seq2seq_lm":
-            if model_config["model_class"] == "BlenderbotForConditionalGeneration":
-                model = BlenderbotForConditionalGeneration.from_pretrained(model_id)
-            else:
-                model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
-        else:
-            model = AutoModelForCausalLM.from_pretrained(model_id)
-        
-        # Move to device
-        model = model.to(device)
-        model.eval()  # Set to evaluation mode
-        
-        # Get memory usage
-        memory_info = psutil.virtual_memory()
-        memory_usage = f"{memory_info.percent}%"
-        
-        # Store model and tokenizer
-        loaded_models[model_id] = {
-            "model": model,
-            "tokenizer": tokenizer,
-            "model_id": model_id,
-            "load_time": datetime.now().isoformat(),
-            "memory_usage": memory_usage,
-            "device": device,
-            "type": model_config["type"],
-            "config": request.config or {}
-        }
-        
-        model_status[model_id] = "loaded"
-        logger.info(f"Model {model_id} loaded successfully on {device}")
-        
-        return {
-            "status": "success", 
-            "message": f"Model {model_id} loaded successfully",
-            "model_id": model_id,
-            "memory_usage": memory_usage,
-            "device": device,
-            "type": model_config["type"]
-        }
-        
-    except Exception as e:
-        model_status[model_id] = "error"
-        logger.error(f"Error loading model {model_id}: {str(e)}")
-        # Clean up on error
-        if model_id in loaded_models:
-            del loaded_models[model_id]
-        raise HTTPException(status_code=500, detail=f"Failed to load model: {str(e)}")
-
-@app.post("/models/generate")
-async def generate_text(request: GenerateRequest):
-    """Generate text using a loaded model - Regular inference"""
-    model_id = request.model_id
-    
-    if model_id not in loaded_models:
-        raise HTTPException(status_code=404, detail="Model not loaded")
-    
-    try:
-        model_info = loaded_models[model_id]
-        model = model_info["model"]
-        tokenizer = model_info["tokenizer"]
-        device = model_info["device"]
-        
-        start_time = time.time()
-        
-        # Tokenize input
-        inputs = tokenizer.encode(request.prompt, return_tensors="pt").to(device)
-        
-        with torch.no_grad():
-            outputs = model.generate(
-                inputs,
-                max_length=inputs.shape[-1] + request.max_length,
-                temperature=request.temperature,
-                do_sample=request.do_sample,
-                top_p=request.top_p,
-                pad_token_id=tokenizer.eos_token_id,
-                no_repeat_ngram_size=3
-            )
-        
-        generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        
-        # Remove input prompt from output
-        if request.prompt in generated_text:
-            generated_text = generated_text.replace(request.prompt, "").strip()
-        
-        processing_time = time.time() - start_time
-        
-        return {
-            "generated_text": generated_text,
-            "model_id": model_id,
-            "prompt": request.prompt,
-            "processing_time": processing_time,
-            "inference_type": "standard",
-            "parameters": {
-                "max_length": request.max_length,
-                "temperature": request.temperature,
-                "top_p": request.top_p
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"Error generating text: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Text generation failed: {str(e)}")
-
-def generate_stream(model, tokenizer, prompt: str, max_length: int = 100, 
-                   temperature: float = 0.7, top_p: float = 0.9) -> Generator[str, None, None]:
-    """Generator function for streaming text generation"""
-    device = next(model.parameters()).device
-    
-    # Tokenize input
-    inputs = tokenizer.encode(prompt, return_tensors="pt").to(device)
-    
-    with torch.no_grad():
-        for i in range(max_length):
-            # Generate next token
-            outputs = model(inputs)
-            next_token_logits = outputs.logits[:, -1, :]
-            
-            # Apply temperature
-            if temperature > 0:
-                next_token_logits = next_token_logits / temperature
-            
-            # Apply top-p filtering
-            if top_p > 0.0:
-                sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
-                cumulative_probs = torch.cumsum(torch.softmax(sorted_logits, dim=-1), dim=-1)
-                sorted_indices_to_remove = cumulative_probs > top_p
-                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
-                sorted_indices_to_remove[..., 0] = 0
-                indices_to_remove = sorted_indices_to_remove.scatter(1, sorted_indices, sorted_indices_to_remove)
-                next_token_logits[indices_to_remove] = float('-inf')
-            
-            # Sample next token
-            probs = torch.softmax(next_token_logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
-            
-            # Check for end token
-            if next_token.item() == tokenizer.eos_token_id:
-                break
-            
-            # Decode and yield the token
-            token_text = tokenizer.decode(next_token[0], skip_special_tokens=True)
-            
-            # Add token to input for next iteration
-            inputs = torch.cat([inputs, next_token], dim=-1)
-            
-            yield token_text
-
-@app.post("/models/generate/stream")
-async def stream_generate_text(request: StreamGenerateRequest):
-    """Generate text with SSE streaming"""
-    model_id = request.model_id
-    
-    if model_id not in loaded_models:
-        raise HTTPException(status_code=404, detail="Model not loaded")
-    
-    model_info = loaded_models[model_id]
-    model = model_info["model"]
-    tokenizer = model_info["tokenizer"]
-    
-    def event_stream():
-        try:
-            # Send start event
-            yield f"data: {json.dumps({'type': 'start', 'message': 'Starting generation...'})}\n\n"
-            
-            start_time = time.time()
-            full_response = ""
-            
-            # Generate tokens
-            for token in generate_stream(model, tokenizer, request.prompt, 
-                                       request.max_length, request.temperature, request.top_p):
-                full_response += token
-                
-                # Send token event
-                yield f"data: {json.dumps({'type': 'token', 'content': token, 'full_text': full_response})}\n\n"
-                
-                # Small delay to make streaming visible
-                time.sleep(0.05)
-            
-            processing_time = time.time() - start_time
-            
-            # Send completion event
-            yield f"data: {json.dumps({'type': 'complete', 'full_text': full_response, 'processing_time': processing_time, 'model_id': model_id})}\n\n"
-            
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
-    
-    return StreamingResponse(event_stream(), media_type="text/plain")
-
-@app.post("/models/generate/batch")
-async def batch_generate_text(request: BatchRequest):
-    """Generate text for multiple prompts in batch"""
-    model_id = request.model_id
-    
-    if model_id not in loaded_models:
-        raise HTTPException(status_code=404, detail="Model not loaded")
-    
-    try:
-        model_info = loaded_models[model_id]
-        model = model_info["model"]
-        tokenizer = model_info["tokenizer"]
-        device = model_info["device"]
-        
-        start_time = time.time()
-        results = []
-        
-        for i, prompt in enumerate(request.prompts):
-            # Tokenize input
-            inputs = tokenizer.encode(prompt, return_tensors="pt").to(device)
-            
-            with torch.no_grad():
-                outputs = model.generate(
-                    inputs,
-                    max_length=inputs.shape[-1] + request.max_length,
-                    temperature=request.temperature,
-                    pad_token_id=tokenizer.eos_token_id,
-                    no_repeat_ngram_size=3
-                )
-            
-            generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-            
-            # Remove input prompt from output
-            if prompt in generated_text:
-                generated_text = generated_text.replace(prompt, "").strip()
-            
-            results.append({
-                "prompt": prompt,
-                "generated_text": generated_text,
-                "index": i
-            })
-        
-        processing_time = time.time() - start_time
-        
-        return {
-            "results": results,
-            "model_id": model_id,
-            "batch_size": len(request.prompts),
-            "processing_time": processing_time,
-            "inference_type": "batch",
-            "avg_time_per_prompt": processing_time / len(request.prompts)
-        }
-        
-    except Exception as e:
-        logger.error(f"Error in batch generation: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Batch generation failed: {str(e)}")
-
-@app.delete("/models/unload/{model_id}")
-async def unload_model(model_id: str):
-    """Unload a specific model and free memory"""
-    if model_id not in loaded_models:
-        raise HTTPException(status_code=404, detail="Model not found or not loaded")
-    
-    try:
-        model_info = loaded_models[model_id]
-        
-        # Delete model and tokenizer to free memory
-        if "model" in model_info:
-            del model_info["model"]
-        if "tokenizer" in model_info:
-            del model_info["tokenizer"]
-            
-        del loaded_models[model_id]
-        model_status[model_id] = "unloaded"
-        
-        # Force garbage collection
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        
-        logger.info(f"Model {model_id} unloaded successfully")
-        return {
-            "status": "success",
-            "message": f"Model {model_id} unloaded successfully"
-        }
-    except Exception as e:
-        logger.error(f"Error unloading model {model_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to unload model: {str(e)}")
-
-@app.get("/models/status/{model_id}")
-async def get_model_status(model_id: str):
-    """Get status of a specific model"""
-    if model_id not in loaded_models and model_id not in model_status:
-        raise HTTPException(status_code=404, detail="Model not found")
-    
-    model_info = loaded_models.get(model_id, {})
-    safe_info = {k: v for k, v in model_info.items() if k not in ["model", "tokenizer"]}
-    
-    return {
-        "model_id": model_id,
-        "status": model_status.get(model_id, "unknown"),
-        "details": safe_info
-    }
+def models_loaded():
+    return {"loaded_models": [m.model_dump() for m in LOADED_MODELS.values()]}
 
 @app.get("/system/stats")
-async def get_system_stats():
-    """Get system resource statistics"""
-    try:
-        memory = psutil.virtual_memory()
-        disk = psutil.disk_usage('/')
-        cpu_percent = psutil.cpu_percent(interval=1)
-        
-        gpu_info = {}
-        if torch.cuda.is_available():
-            gpu_info = {
-                "gpu_available": True,
-                "gpu_count": torch.cuda.device_count(),
-                "current_device": torch.cuda.current_device(),
-                "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else "Unknown"
-            }
-        else:
-            gpu_info = {"gpu_available": False}
-        
-        return {
-            "memory": {
-                "total": f"{memory.total / (1024**3):.2f} GB",
-                "used": f"{memory.used / (1024**3):.2f} GB", 
-                "available": f"{memory.available / (1024**3):.2f} GB",
-                "percentage": f"{memory.percent}%"
-            },
-            "disk": {
-                "total": f"{disk.total / (1024**3):.2f} GB",
-                "used": f"{disk.used / (1024**3):.2f} GB",
-                "free": f"{disk.free / (1024**3):.2f} GB"
-            },
-            "cpu": {"usage_percent": f"{cpu_percent}%"},
-            "gpu": gpu_info,
-            "loaded_models_count": len(loaded_models),
-            "system": sys.platform
-        }
-    except Exception as e:
-        logger.error(f"Error getting system stats: {str(e)}")
-        return {"error": "Could not retrieve system stats", "loaded_models_count": len(loaded_models)}
-
-@app.get("/")
-async def root():
-    """Root endpoint with API information"""
+def system_stats():
+    # lightweight system snapshot
+    vm = psutil.virtual_memory()
+    cpu = psutil.cpu_percent(interval=0.1)
     return {
-        "service": "TorchWeave Model Manager",
-        "version": "1.0.0",
-        "status": "running",
-        "features": ["SSE Streaming", "Batch Processing", "Real-time Inference"],
-        "endpoints": {
-            "health": "/health",
-            "docs": "/docs",
-            "available_models": "/models/available",
-            "loaded_models": "/models/loaded",
-            "load_model": "/models/load",
-            "generate": "/models/generate",
-            "stream_generate": "/models/generate/stream",
-            "batch_generate": "/models/generate/batch",
-            "system_stats": "/system/stats"
-        }
+        "cpu_percent": cpu,
+        "memory": {
+            "percent": vm.percent,
+            "total": vm.total,
+            "available": vm.available,
+            "used": vm.used,
+        },
+        "loaded_models": list(LOADED_MODELS.keys()),
+        "service": "model-manager",
     }
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+@app.post("/models/load")
+async def load_model(request: Request):
+    payload = await _read_payload_json_or_form(request)
+    model_id = _resolve_model_id(payload)
+
+    # If already loaded: return early
+    if model_id in MODEL_REGISTRY:
+        return {
+            "success": True,
+            "message": f"Model {model_id} is already loaded",
+            "model_id": model_id,
+            "status_code": 200,
+        }
+
+    t0 = time.time()
+    try:
+        _ensure_pipe(model_id)
+        t1 = time.time()
+        return {
+            "success": True,
+            "message": f"Model {model_id} loaded successfully",
+            "model_id": model_id,
+            "load_time": t1 - t0,
+            "device": DEVICE,
+            "status_code": 200,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load model {model_id}: {e}")
+
+@app.post("/models/generate")
+async def generate(request: Request):
+    """
+    Accept both JSON and form data for generation requests.
+    Fixed to properly handle both content types and generate text correctly.
+    """
+    try:
+        payload = await _read_payload_json_or_form(request)
+        
+        # Convert form data to proper types if needed
+        if isinstance(payload.get("max_length"), str):
+            payload["max_length"] = int(payload["max_length"])
+        if isinstance(payload.get("max_new_tokens"), str):
+            payload["max_new_tokens"] = int(payload["max_new_tokens"])
+        if isinstance(payload.get("temperature"), str):
+            payload["temperature"] = float(payload["temperature"])
+        if isinstance(payload.get("top_p"), str):
+            payload["top_p"] = float(payload["top_p"])
+        if isinstance(payload.get("top_k"), str):
+            payload["top_k"] = int(payload["top_k"])
+        if isinstance(payload.get("repetition_penalty"), str):
+            payload["repetition_penalty"] = float(payload["repetition_penalty"])
+
+        # Create GenerateBody object
+        data = GenerateBody(**payload)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=f"Invalid input data: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Request parsing failed: {e}")
+
+    model_id = _resolve_model_id(payload)
+    prompt = data.prompt
+    if not prompt:
+        raise HTTPException(status_code=422, detail="Field 'prompt' is required")
+
+    # ensure model/pipeline
+    try:
+        text_gen = _ensure_pipe(model_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load model {model_id}: {e}")
+
+    # Prepare generation kwargs
+    gen_kwargs = _build_generate_kwargs(data)
+
+    # Timing
+    t0_total = time.time()
+    t0_tok = time.time()
+    tokenizer = MODEL_REGISTRY[model_id]["tokenizer"]
+    input_tokens = tokenizer.encode(prompt, add_special_tokens=False)
+    tokenization_time = time.time() - t0_tok
+
+    # Run generation
+    t0_gen = time.time()
+    try:
+        outputs = text_gen(prompt, **gen_kwargs)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Generation failed: {e}")
+    generation_time = time.time() - t0_gen
+
+    # Enhanced text extraction and processing
+    t0_dec = time.time()
+    generated_text = ""
+    token_count = 0
+    
+    try:
+        if outputs and isinstance(outputs, list) and len(outputs) > 0:
+            raw_output = outputs[0]
+            
+            if isinstance(raw_output, dict) and "generated_text" in raw_output:
+                full_generated = raw_output["generated_text"]
+                
+                # More robust prompt removal
+                if full_generated.startswith(prompt):
+                    generated_text = full_generated[len(prompt):].strip()
+                else:
+                    # Fallback: find the prompt in the output and remove everything before it
+                    prompt_pos = full_generated.find(prompt)
+                    if prompt_pos >= 0:
+                        generated_text = full_generated[prompt_pos + len(prompt):].strip()
+                    else:
+                        # If prompt not found, use the full output
+                        generated_text = full_generated.strip()
+                
+                # Ensure we have some output - if still empty after prompt removal
+                if not generated_text and full_generated.strip():
+                    # Use everything after the first newline or significant break
+                    lines = full_generated.split('\n')
+                    if len(lines) > 1:
+                        generated_text = '\n'.join(lines[1:]).strip()
+                    elif len(full_generated.strip()) > len(prompt.strip()) + 5:
+                        # Use second half if no line breaks and significantly longer
+                        mid_point = len(prompt)
+                        generated_text = full_generated[mid_point:].strip()
+                    else:
+                        # Last resort - show that generation occurred
+                        generated_text = full_generated.strip()
+                
+                # Calculate token count
+                if generated_text:
+                    try:
+                        tokens = tokenizer.encode(generated_text, add_special_tokens=False)
+                        token_count = len(tokens)
+                    except:
+                        token_count = max(1, len(generated_text.split()))
+                
+            else:
+                generated_text = str(raw_output) if raw_output else ""
+                token_count = max(1, len(generated_text.split())) if generated_text else 0
+                
+        else:
+            generated_text = ""
+            token_count = 0
+            
+    except Exception as e:
+        logger.error(f"Error processing generated text: {e}", exc_info=True)
+        generated_text = f"Error processing output: {str(e)}"
+        token_count = 0
+    
+    decoding_time = time.time() - t0_dec
+
+    total_time = time.time() - t0_total
+    ttft = generation_time  # rough: no streaming, so entire generation ~= TTFT
+
+    tokens_per_second = (token_count / generation_time) if generation_time > 0 else 0.0
+
+    return {
+        "generated_text": generated_text,
+        "model_id": model_id,
+        "prompt": prompt,
+        "metrics": {
+            "total_time": total_time,
+            "tokenization_time": tokenization_time,
+            "generation_time": generation_time,
+            "decoding_time": decoding_time,
+            "ttft_estimate": ttft,
+            "tokens_per_second": tokens_per_second,
+            "token_count": token_count,
+            "input_token_count": len(input_tokens),
+            "method": "baseline_no_batching",
+        },
+        "model_info": {
+            "device": DEVICE,
+            "max_length": payload.get("max_length", 128),
+            "temperature": payload.get("temperature", 1.0),
+        },
+    }

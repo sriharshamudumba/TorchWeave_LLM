@@ -1,39 +1,23 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
-# Set working directory
+# (optional) small build toolchain for some wheels
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential wget curl && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Update system packages and install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+# Install deps from your requirements file
+# (build context is ./model-manager)
+COPY requirements.txt /app/model-manager/requirements.txt
+RUN pip install --no-cache-dir -r /app/model-manager/requirements.txt
 
-# Install Python dependencies
-RUN pip install --no-cache-dir \
-    fastapi \
-    uvicorn \
-    pydantic \
-    httpx \
-    huggingface_hub \
-    psutil \
-    transformers \
-    torch \
-    --extra-index-url https://download.pytorch.org/whl/cpu
+# Copy only the source
+COPY src /app/model-manager/src
 
-# Copy source code
-COPY src/ /app/src/
+# Runtime env
+ENV PYTHONPATH=/app:/app/model-manager/src
+ENV TOKENIZERS_PARALLELISM=false
 
-# Expose port
-EXPOSE 8001
-
-# Set environment variables
-ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8001/health || exit 1
-
-# Run the application
-CMD ["uvicorn", "src.model_manager:app", "--host", "0.0.0.0", "--port", "8001"]
+# Run from the source dir by default
+WORKDIR /app/model-manager/src

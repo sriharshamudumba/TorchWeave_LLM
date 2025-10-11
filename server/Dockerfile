@@ -9,12 +9,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
-COPY server/requirements.txt /app/server/requirements.txt
+# The COPY commands are now relative to the build context (./server)
+COPY requirements.txt /app/server/requirements.txt
 RUN pip install --no-cache-dir -r /app/server/requirements.txt
 
 # Set Python path to find modules
 ENV PYTHONPATH=/app:/app/server/src
 
 # Copy the source code
-COPY server/src /app/server/src
+COPY src /app/server/src

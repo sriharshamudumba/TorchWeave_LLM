@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+"""
+Final TorchWeave Server Performance Benchmark
+Tests your actual running TorchWeave server with sequential vs concurrent requests
+"""
+
+import asyncio
+import time
+import statistics
+import argparse
+import json
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass
+import sys
+
+try:
+    import httpx
+except ImportError:
+    print("Missing httpx. Install with: pip install httpx")
+    sys.exit(1)
+
+@dataclass
+class BenchmarkResult:
+    """Individual request benchmark result"""
+    request_id: str
+    prompt: str
+    generated_text: str
+    total_time: float
+    ttft: float
+    tokens_generated: int
+    throughput: float
+    processing_type: str
+    batch_info: Optional[Dict] = None
+
+class TorchWeaveServerBenchmark:
+    """Benchmark tool for testing actual TorchWeave server performance"""
+    
+    def __init__(self, server_url: str = "http://127.0.0.1:8000", 
+                 model_manager_url: str = "http://127.0.0.1:8001"):
+        self.server_url = server_url
+        self.model_manager_url = model_manager_url
+        self.timeout = httpx.Timeout(300.0)
+        
+    async def check_server_health(self):
+        """Check if TorchWeave servers are running"""
+        print("Checking TorchWeave server health...")
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{self.server_url}/health")
+                if response.status_code != 200:
+                    print(f"[ERROR] Main server unhealthy: {response.status_code}")
+                    return False
+                print(f"[SUCCESS] Main server healthy")
+                
+                response = await client.get(f"{self.model_manager_url}/health")
+                if response.status_code != 200:
+                    print(f"[ERROR] Model manager unhealthy: {response.status_code}")
+                    return False
+                print(f"[SUCCESS] Model manager healthy")
+                return True
+        except Exception as e:
+            print(f"[ERROR] Cannot connect to servers: {e}")
+            return False
+    
+    async def list_available_models(self):
+        """List models loaded in TorchWeave"""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"{self.model_manager_url}/models/loaded")
+                if response.status_code == 200:
+                    models_data = response.json()
+                    models = models_data.get("loaded_models", [])
+                    
+                    if models:
+                        print(f"[INFO] Loaded models ({len(models)}):")
+                        available_models = []
+                        for model in models:
+                            model_id = model.get("model_id", "unknown")
+                            status = model.get("status", "unknown")
+                            print(f"   - {model_id} (Status: {status})")
+                            if status in ["loaded", "available"]:
+                                available_models.append(model_id)
+                        return available_models
+                    else:
+                        print("[WARNING] No models currently loaded in TorchWeave")
+                        return []
+                else:
+                    print(f"[ERROR] Failed to list models: {response.status_code}")
+                    return []
+        except Exception as e:
+            print(f"[ERROR] Error listing models: {e}")
+            return []
+    
+    async def single_request(self, model_id: str, prompt: str, max_tokens: int = 30, 
+                           temperature: float = 0.7, request_id: str = ""):
+        """Send single request to model manager"""
+        print(f"\n--- SEQUENTIAL REQUEST: {request_id} ---")
+        print(f"Prompt: '{prompt}'")
+        
+        payload = {
+            "model_id": model_id,
+            "prompt": prompt,
+            "max_new_tokens": max_tokens,
+            "temperature": temperature
+        }
+        
+        request_start = time.time()
+        
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(f"{self.model_manager_url}/models/generate", json=payload)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    request_end = time.time()
+                    
+                    generated_text = result.get("generated_text", "")
+                    metrics = result.get("metrics", {})
+                    
+                    total_time = request_end - request_start
+                    ttft = metrics.get("ttft_estimate", 0.0)
+                    tokens_generated = metrics.get("token_count", len(generated_text.split()))
+                    throughput = tokens_generated / total_time if total_time > 0 else 0
+                    
+                    print(f"  FULL GENERATED TEXT: '{generated_text}'")
+                    print(f"  METRICS:")
+                    print(f"    - Total Time: {total_time:.3f}s")
+                    print(f"    - TTFT: {ttft:.3f}s")
+                    print(f"    - Tokens Generated: {tokens_generated}")
+                    print(f"    - Tokens/sec: {throughput:.2f}")
+                    
+                    return BenchmarkResult(
+                        request_id=request_id,
+                        prompt=prompt,
+                        generated_text=generated_text,
+                        total_time=total_time,
+                        ttft=ttft,
+                        tokens_generated=tokens_generated,
+                        throughput=throughput,
+                        processing_type="SEQUENTIAL"
+                    )
+                else:
+                    print(f"[ERROR] Request failed: {response.status_code}")
+                    return None
+        except Exception as e:
+            print(f"[ERROR] Request failed: {e}")
+            return None
+    
+    async def run_simple_benchmark(self, model_id: str, prompts: List[str], max_tokens: int = 30):
+        """Run simple benchmark"""
+        print(f"\n{'='*80}")
+        print(f"TORCHWEAVE SERVER BENCHMARK")
+        print(f"{'='*80}")
+        print(f"Model: {model_id}")
+        print(f"Requests: {len(prompts)}")
+        print(f"Max Tokens: {max_tokens}")
+        
+        # Health check
+        if not await self.check_server_health():
+            return False
+        
+        # Verify model
+        available_models = await self.list_available_models()
+        if model_id not in available_models:
+            print(f"[ERROR] Model '{model_id}' not available")
+            return False
+        
+        # Run sequential requests
+        sequential_results = []
+        sequential_start = time.time()
+        
+        for i, prompt in enumerate(prompts):
+            result = await self.single_request(model_id, prompt, max_tokens, 0.7, f"SEQ-{i+1}")
+            if result:
+                sequential_results.append(result)
+        
+        sequential_total_time = time.time() - sequential_start
+        
+        # Print results
+        print(f"\n{'='*80}")
+        print(f"RESULTS SUMMARY")
+        print(f"{'='*80}")
+        
+        total_tokens = sum(r.tokens_generated for r in sequential_results)
+        avg_time = sum(r.total_time for r in sequential_results) / len(sequential_results)
+        overall_throughput = total_tokens / sequential_total_time
+        
+        print(f"Total Processing Time: {sequential_total_time:.3f}s")
+        print(f"Average Request Time: {avg_time:.3f}s") 
+        print(f"Total Tokens Generated: {total_tokens}")
+        print(f"Overall Throughput: {overall_throughput:.2f} tokens/sec")
+        
+        return True
+
+def generate_test_prompts(base_prompt: str, count: int) -> List[str]:
+    """Generate variations of a base prompt"""
+    if count == 1:
+        return [base_prompt]
+    
+    variations = [
+        f"{base_prompt}",
+        f"{base_prompt} Please be creative.",
+        f"{base_prompt} Make it interesting.", 
+        f"{base_prompt} Keep it concise.",
+        f"{base_prompt} Add some details."
+    ]
+    
+    result = []
+    for i in range(count):
+        result.append(variations[i % len(variations)])
+    
+    return result
+
+async def main():
+    parser = argparse.ArgumentParser(description="TorchWeave Server Benchmark")
+    parser.add_argument("--model", default=None, help="Model ID to test")
+    parser.add_argument("--max-tokens", type=int, default=25, help="Max tokens to generate")
+    parser.add_argument("--requests", type=int, default=3, help="Number of requests")
+    parser.add_argument("--custom-prompts", nargs="+", help="Custom prompts")
+    parser.add_argument("--prompt", default="Write a short story.", help="Base prompt")
+    
+    args = parser.parse_args()
+    
+    benchmark = TorchWeaveServerBenchmark()
+    
+    # Get model
+    if args.model:
+        model_id = args.model
+    else:
+        available_models = await benchmark.list_available_models()
+        if not available_models:
+            print("[ERROR] No models available")
+            return
+        model_id = available_models[0]
+        print(f"[INFO] Using model: {model_id}")
+    
+    # Get prompts
+    if args.custom_prompts:
+        test_prompts = args.custom_prompts
+    else:
+        test_prompts = generate_test_prompts(args.prompt, args.requests)
+    
+    # Run benchmark
+    await benchmark.run_simple_benchmark(model_id, test_prompts, args.max_tokens)
+
+if __name__ == "__main__":
+    asyncio.run(main())

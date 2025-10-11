@@ -1,33 +1,31 @@
-# TorchWeave LLM: High-Performance Inference Server
+# TorchWeave LLM – High-Performance Inference Server
 
+TorchWeave LLM is a modular, high-performance inference platform designed for efficient large language model (LLM) serving. It supports continuous batching, dynamic model management, and real-time token streaming through a fully containerized microservices architecture.
 
-[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-312/)
-[![Docker](https://img.shields.io/badge/docker-compose-blue.svg)](https://docs.docker.com/compose/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104-green.svg)](https://fastapi.tiangolo.com/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
+---
 
-A high-performance distributed LLM inference server featuring continuous batching, dynamic model management, KV-cache optimization, and real-time streaming capabilities.
-
-## 🚀 Features
+## Features
 
 ### Core Performance
-- **Continuous Batching**: Efficient request processing with dynamic batching
-- **KV-Cache Optimization**: Per-request cache management for memory efficiency
-- **Dynamic Model Loading**: Runtime model management with HuggingFace Hub integration
-- **Real-time Streaming**: Server-Sent Events (SSE) for token-by-token delivery
+- **Continuous Batching** – Dynamically batches incoming requests for optimal GPU utilization  
+- **KV-Cache Optimization** – Manages per-request cache to reduce redundant computation  
+- **Dynamic Model Loading** – Loads and unloads models at runtime via Hugging Face integration  
+- **Real-Time Streaming** – Supports Server-Sent Events (SSE) for token-level streaming responses  
 
 ### Infrastructure
-- **Microservices Architecture**: Containerized services with Docker Compose
-- **Redis Integration**: Distributed caching and session management  
-- **Model Manager**: Dedicated service for model lifecycle management
-- **Web Interface**: Interactive UI for model interaction and management
+- **Microservices Architecture** – Modular components managed through Docker Compose  
+- **Redis Integration** – Provides distributed caching and session tracking  
+- **Model Manager** – Handles model lifecycle, including search, load, and unload operations  
+- **Web Interface** – Offers an interactive UI for model testing and management  
 
 ### Developer Experience
-- **REST API**: OpenAPI/Swagger documentation
-- **Health Monitoring**: Comprehensive health checks and status endpoints
-- **CI/CD Pipeline**: GitHub Actions for automated testing and deployment
+- **REST API** – Built with FastAPI and documented via OpenAPI/Swagger  
+- **Health Monitoring** – Includes endpoint-based service and system health checks  
+- **CI/CD Pipeline** – Uses GitHub Actions for automated testing and deployment  
 
-## 🏗️ Architecture
+---
+
+## System Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -42,12 +40,14 @@ A high-performance distributed LLM inference server featuring continuous batchin
                        └─────────────────┘
 ```
 
-## 🚀 Quick Start
+---
+
+## Quick Start
 
 ### Prerequisites
-- Docker & Docker Compose
-- Python 3.12+ (for local development)
-- CUDA-compatible GPU (recommended)
+- Docker and Docker Compose  
+- Python 3.12 or newer (for local development)  
+- CUDA-compatible GPU (recommended for optimal performance)  
 
 ### Using Docker (Recommended)
 
@@ -67,26 +67,24 @@ A high-performance distributed LLM inference server featuring continuous batchin
    docker-compose ps
    ```
 
-### Access Points
-- **Web Interface**: http://localhost:3000
-- **Main API**: http://localhost:8000
-- **Model Manager**: http://localhost:8001
-- **API Documentation**: http://localhost:8000/docs
+### Service Access
+- Web Interface: http://localhost:3000  
+- Main API: http://localhost:8000  
+- Model Manager: http://localhost:8001  
+- API Documentation: http://localhost:8000/docs
 
-## 🔧 API Usage
+---
+
+## API Examples
 
 ### Load a Model
 ```bash
-curl -X POST http://localhost:8001/models/load \
-  -H "Content-Type: application/json" \
-  -d '{"model_id": "microsoft/DialoGPT-medium"}'
+curl -X POST http://localhost:8001/models/load   -H "Content-Type: application/json"   -d '{"model_id": "microsoft/DialoGPT-medium"}'
 ```
 
 ### Generate Text
 ```bash
-curl -X POST http://localhost:8000/generate \
-  -H "Content-Type: application/json" \
-  -d '{
+curl -X POST http://localhost:8000/generate   -H "Content-Type: application/json"   -d '{
     "prompt": "Hello, how are you?",
     "max_length": 50,
     "temperature": 0.7
@@ -95,53 +93,49 @@ curl -X POST http://localhost:8000/generate \
 
 ### Stream Responses (SSE)
 ```bash
-curl -N http://localhost:8000/stream \
-  -H "Accept: text/event-stream" \
-  -d '{"prompt": "Tell me a story", "max_length": 100}'
+curl -N http://localhost:8000/stream   -H "Accept: text/event-stream"   -d '{"prompt": "Tell me a story", "max_length": 100}'
 ```
 
-### Search HuggingFace Models
+### Search Models on Hugging Face
 ```bash
 curl http://localhost:8001/models/search/llama?limit=5
 ```
 
-## 📖 Service Details
+---
+
+## Service Overview
 
 ### Main Server (`server/`)
-- **FastAPI application** handling inference requests
-- **Continuous batching** for optimal throughput
-- **SSE streaming** for real-time token delivery
-- **KV-cache management** for memory efficiency
+- FastAPI service handling inference requests  
+- Implements continuous batching for throughput optimization  
+- Supports SSE-based real-time token streaming  
+- Manages per-request KV-cache for efficient memory usage  
 
 ### Model Manager (`model-manager/`)
-- **Dynamic model loading** from HuggingFace Hub
-- **Model lifecycle management** (load, unload, monitor)
-- **Health monitoring** and progress tracking
-- **Model search** and discovery
+- Dynamically loads models from the Hugging Face Hub  
+- Handles model lifecycle operations and health monitoring  
+- Provides model discovery and search APIs  
 
 ### Web Interface (`ui/`)
-- **Interactive chat interface** for model testing
-- **Model management dashboard** 
-- **Real-time streaming** visualization
-- **System monitoring** and health checks
+- Offers an interactive chat-style interface for testing  
+- Includes dashboards for model and system status  
+- Visualizes token streaming in real time  
 
 ### Optimizer Service
-- **Model optimization** techniques
-- **Performance profiling** and metrics
-- **Resource utilization** monitoring
+- Performs runtime model optimization  
+- Profiles model performance and resource usage  
+- Reports metrics for fine-tuning deployment configurations  
 
-## 🛠️ Development
+---
 
-### Local Setup
+## Development Setup
+
+### Local Development
 ```bash
-# Create virtual environment
 python -m venv llm_env
 source llm_env/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
 
-# Run individual services
 python -m src.server
 python -m src.model_manager
 ```
@@ -151,74 +145,91 @@ python -m src.model_manager
 pytest tests/
 ```
 
-### Code Quality
+### Code Quality Checks
 ```bash
-# Format code
 black src/
 isort src/
-
-# Type checking
 mypy src/
-
-# Linting
 flake8 src/
 ```
 
-## 📊 Performance Features
+---
+
+## Performance Features
 
 ### Continuous Batching
-- Dynamic request batching for maximum GPU utilization
-- Per-request KV-cache management
-- Adaptive batch sizing based on model capacity
+- Groups incoming requests dynamically based on GPU availability  
+- Manages KV-cache per request to reduce redundancy  
+- Adapts batch size in real time based on model load  
 
 ### Memory Optimization
-- Efficient attention mechanism implementation
-- KV-cache pruning and management
-- Memory-mapped model loading
+- Implements efficient attention operations  
+- Prunes and reuses cache entries for memory savings  
+- Uses memory-mapped loading for large models  
 
-### Streaming Capabilities
-- Real-time token delivery via SSE
-- Time-to-first-token optimization
-- Configurable streaming parameters
-
-## 🔍 Monitoring
-
-### Health Endpoints
-- **Server Health**: `GET /health`
-- **Model Manager Health**: `GET http://localhost:8001/health`
-- **System Status**: `GET http://localhost:8001/status`
-
-### Metrics & Logging
-- Request/response latency tracking
-- Token generation speed monitoring
-- Resource utilization metrics
-- Comprehensive logging with structured format
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- **HuggingFace Transformers** for model implementations
-- **FastAPI** for the web framework
-- **PyTorch** for deep learning capabilities
-- **Redis** for caching and session management
-
-## 📞 Support
-
-- **Documentation**: Check the `/docs` endpoints for API documentation
-- **Issues**: Report bugs via GitHub Issues
-- **Discussions**: Join project discussions for feature requests
+### Streaming
+- Streams tokens as they are generated using SSE  
+- Minimizes time-to-first-token (TTFT)  
+- Allows configurable streaming parameters  
 
 ---
 
-**Built  for high-performance LLM inference**
+## Monitoring and Health
+
+### Health Endpoints
+- Main Server: `GET /health`  
+- Model Manager: `GET /health`  
+- System Status: `GET /status`  
+
+### Metrics and Logging
+- Tracks request latency and throughput  
+- Monitors token generation rates  
+- Logs resource utilization and model statistics  
+
+---
+
+## Contributing
+
+1. Fork the repository  
+2. Create a feature branch:  
+   ```bash
+   git checkout -b feature/my-feature
+   ```  
+3. Commit your changes:  
+   ```bash
+   git commit -m "Add my feature"
+   ```  
+4. Push the branch:  
+   ```bash
+   git push origin feature/my-feature
+   ```  
+5. Open a Pull Request  
+
+---
+
+## License
+
+This project is licensed under the MIT License.  
+See the [LICENSE](LICENSE) file for details.
+
+---
+
+## Acknowledgments
+
+TorchWeave LLM builds on the following open-source technologies:
+- Hugging Face Transformers  
+- FastAPI  
+- PyTorch  
+- Redis  
+
+---
+
+## Support
+
+- **Documentation:** Available via the `/docs` endpoint  
+- **Issues:** Use GitHub Issues for bug reports and feature requests  
+- **Discussions:** Participate in ongoing conversations in the project’s Discussions tab  
+
+---
+
+**TorchWeave LLM — built for reliable, high-performance language model inference.**

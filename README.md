@@ -66,7 +66,7 @@ A high-performance distributed LLM inference server featuring continuous batchin
 - **Model Manager**: http://localhost:8001
 - **API Documentation**: http://localhost:8000/docs
 
-## 🔧 API Usage
+##  API Usage
 
 ### Load a Model
 ```bash
@@ -98,7 +98,7 @@ curl -N http://localhost:8000/stream \
 curl http://localhost:8001/models/search/llama?limit=5
 ```
 
-## 📖 Service Details
+##  Service Details
 
 ### Main Server (`server/`)
 - **FastAPI application** handling inference requests
@@ -123,7 +123,7 @@ curl http://localhost:8001/models/search/llama?limit=5
 - **Performance profiling** and metrics
 - **Resource utilization** monitoring
 
-## 🛠️ Development
+##  Development
 
 ### Local Setup
 ```bash
@@ -225,7 +225,7 @@ A high-performance LLM inference server implementing continuous batching, per-re
 - **Container-Native**: Docker Compose orchestration with optimizer sidecar
 - **Production-Ready**: ECS/Kubernetes-friendly architecture with shared artifact storage
 
-## 📊 Performance Benchmarks
+##  Performance Benchmarks
 
 | Configuration | Tokens/sec | TTFT (avg) | Throughput Gain |
 |--------------|------------|------------|-----------------|

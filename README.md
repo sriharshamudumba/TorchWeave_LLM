@@ -1,7 +1,7 @@
 
 A high-performance distributed LLM inference server featuring continuous batching, dynamic model management, KV-cache optimization, and real-time streaming capabilities.
 
-## 🚀 Features
+## Features
 
 ### Core Performance
 - **Continuous Batching**: Efficient request processing with dynamic batching
@@ -20,7 +20,7 @@ A high-performance distributed LLM inference server featuring continuous batchin
 - **Health Monitoring**: Comprehensive health checks and status endpoints
 - **CI/CD Pipeline**: GitHub Actions for automated testing and deployment
 
-## 🏗️ Architecture
+##  Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -35,7 +35,7 @@ A high-performance distributed LLM inference server featuring continuous batchin
                        └─────────────────┘
 ```
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Prerequisites
 - Docker & Docker Compose
@@ -66,7 +66,7 @@ A high-performance distributed LLM inference server featuring continuous batchin
 - **Model Manager**: http://localhost:8001
 - **API Documentation**: http://localhost:8000/docs
 
-## 🔧 API Usage
+## API Usage
 
 ### Load a Model
 ```bash
@@ -98,7 +98,7 @@ curl -N http://localhost:8000/stream \
 curl http://localhost:8001/models/search/llama?limit=5
 ```
 
-## 📖 Service Details
+## Service Details
 
 ### Main Server (`server/`)
 - **FastAPI application** handling inference requests
@@ -123,7 +123,7 @@ curl http://localhost:8001/models/search/llama?limit=5
 - **Performance profiling** and metrics
 - **Resource utilization** monitoring
 
-## 🛠️ Development
+##  Development
 
 ### Local Setup
 ```bash
@@ -157,7 +157,7 @@ mypy src/
 flake8 src/
 ```
 
-## 📊 Performance Features
+##  Performance Features
 
 ### Continuous Batching
 - Dynamic request batching for maximum GPU utilization
@@ -174,7 +174,7 @@ flake8 src/
 - Time-to-first-token optimization
 - Configurable streaming parameters
 
-## 🔍 Monitoring
+##  Monitoring
 
 ### Health Endpoints
 - **Server Health**: `GET /health`
@@ -187,7 +187,7 @@ flake8 src/
 - Resource utilization metrics
 - Comprehensive logging with structured format
 
-## 🤝 Contributing
+##  Contributing
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -195,18 +195,18 @@ flake8 src/
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📄 License
+##  License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+##  Acknowledgments
 
 - **HuggingFace Transformers** for model implementations
 - **FastAPI** for the web framework
 - **PyTorch** for deep learning capabilities
 - **Redis** for caching and session management
 
-## 📞 Support
+##  Support
 
 - **Documentation**: Check the `/docs` endpoints for API documentation
 - **Issues**: Report bugs via GitHub Issues
@@ -216,7 +216,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 A high-performance LLM inference server implementing continuous batching, per-request KV-cache management, and Server-Sent Events (SSE) streaming. Designed for production-scale deployment with **2-5x throughput improvements** under concurrent load.
 
 <<<<<<< HEAD
-## 🚀 Key Features
+##  Key Features
 
 - **Continuous Batching**: Merges concurrent requests into shared decode steps for maximum GPU utilization
 - **Per-Request KV-Cache**: Individual memory management with attention masks for variable sequence lengths
@@ -225,7 +225,7 @@ A high-performance LLM inference server implementing continuous batching, per-re
 - **Container-Native**: Docker Compose orchestration with optimizer sidecar
 - **Production-Ready**: ECS/Kubernetes-friendly architecture with shared artifact storage
 
-## 📊 Performance Benchmarks
+##  Performance Benchmarks
 
 | Configuration | Tokens/sec | TTFT (avg) | Throughput Gain |
 |--------------|------------|------------|-----------------|
@@ -235,7 +235,7 @@ A high-performance LLM inference server implementing continuous batching, per-re
 
 *Benchmarked on TinyLlama-1.1B with CPU inference*
 
-## 🏗️ Architecture
+##  Architecture
 
 ```mermaid
 graph TB
@@ -281,7 +281,7 @@ graph TB
     SSE --> C3
 ```
 
-## 🛠️ Technology Stack
+##  Technology Stack
 
 - **Backend**: Python 3.12, FastAPI, Uvicorn
 - **ML Framework**: PyTorch, Hugging Face Transformers
@@ -291,7 +291,7 @@ graph TB
 - **Orchestration**: ECS/Kubernetes ready
 - **Monitoring**: Built-in TTFT metrics, request logging
 
-## 📂 Project Structure
+##  Project Structure
 
 ```
 TorchWeave_LLM/
@@ -314,7 +314,7 @@ TorchWeave_LLM/
 └── .env.example              # Environment template
 ```
 
-## 🚦 Quick Start
+##  Quick Start
 
 ### Prerequisites
 
@@ -360,7 +360,7 @@ curl -X POST http://localhost:8000/v1/generate_nobatch \
   -d '{"prompt":"Explain quantum computing","max_new_tokens":64}'
 ```
 
-## 📡 API Reference
+##  API Reference
 
 ### Core Endpoints
 
@@ -432,7 +432,7 @@ Baseline generation without batching
 {"text": "Generated response text"}
 ```
 
-## ⚙️ Configuration
+##  Configuration
 
 ### Environment Variables
 
@@ -461,7 +461,7 @@ ARTIFACT_MODEL_DIR=/artifacts/model
 - **Memory Optimization**: Use smaller models or reduce batch size
 - **GPU Utilization**: Enable CUDA with appropriate batch sizes
 
-## 🧪 Benchmarking
+##  Benchmarking
 
 Run performance comparisons:
 
@@ -482,7 +482,7 @@ python scripts/bench.py --concurrency 1 --iters 24 --nobatch http://localhost:80
 - **Request time**: End-to-end request duration
 - **Concurrency impact**: Performance under load
 
-## 🏷️ Branch Structure
+##  Branch Structure
 
 This repository uses feature branches to demonstrate specific technical implementations:
 
@@ -495,7 +495,7 @@ This repository uses feature branches to demonstrate specific technical implemen
 - `integration/complete-system` - Full system integration
 - `release/v1.0.0` - Production release
 
-## 🐳 Deployment
+##  Deployment
 
 ### Local Development
 
@@ -541,7 +541,7 @@ spec:
 - **Artifact Storage**: Shared volumes for model consistency
 - **Health Checks**: Built-in `/health` endpoint for orchestrators
 
-## 🛡️ Monitoring & Observability
+##  Monitoring & Observability
 
 ### Built-in Metrics
 
@@ -563,7 +563,7 @@ docker compose logs server | grep "\[Scheduler\]"
 docker compose logs server | grep "TTFT\|tokens/sec"
 ```
 
-## 🔧 Troubleshooting
+##  Troubleshooting
 
 ### Common Issues
 
@@ -604,7 +604,7 @@ MAX_BATCH=8 docker compose restart server
 docker stats torchweave_llm_server-server-1
 ```
 
-## 🤝 Contributing
+##  Contributing
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -612,11 +612,11 @@ docker stats torchweave_llm_server-server-1
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📄 License
+##  License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+##  Acknowledgments
 
 - [Hugging Face Transformers](https://github.com/huggingface/transformers) for model infrastructure
 - [FastAPI](https://fastapi.tiangolo.com/) for high-performance web framework

@@ -33,10 +33,10 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
-from server.scheduler import ContinuousBatchScheduler, SchedulerConfig, InferenceRequest
+from server.scheduler import (ContinuousBatchScheduler, InferenceRequest,
+                              SchedulerConfig)
 from server.zero_copy_kv_cache import ZeroCopyKVCache
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # ---------------------------------------------------------------------------
 # Minimal step function for benchmarking

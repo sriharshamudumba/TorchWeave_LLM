@@ -1,4 +1,6 @@
-import time, torch
+import time
+
+import torch
 
 
 def _inputs(tok, bsz, prefill):

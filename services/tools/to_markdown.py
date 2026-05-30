@@ -1,4 +1,5 @@
-import sys, json
+import json
+import sys
 
 j = json.load(sys.stdin)
 

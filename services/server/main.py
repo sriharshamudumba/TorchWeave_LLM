@@ -1,4 +1,8 @@
-import os, tarfile, tempfile, torch
+import os
+import tarfile
+import tempfile
+
+import torch
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel

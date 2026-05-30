@@ -4,8 +4,9 @@ TorchWeave Debug Script - Diagnose benchmark failures
 """
 
 import asyncio
-import httpx
 import json
+
+import httpx
 
 
 async def debug_torchweave_setup():

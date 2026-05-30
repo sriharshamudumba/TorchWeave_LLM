@@ -1,5 +1,9 @@
 # scripts/bench.py
-import argparse, asyncio, time, httpx
+import argparse
+import asyncio
+import time
+
+import httpx
 
 PROMPT = "You are a helpful assistant. Briefly list 5 pros of CUDA for LLM inference:"
 

@@ -1,4 +1,8 @@
-import os, json, tarfile, tempfile, uuid
+import json
+import os
+import tarfile
+import tempfile
+import uuid
 
 ART_DIR = os.getenv("ART_DIR", "/artifacts")
 

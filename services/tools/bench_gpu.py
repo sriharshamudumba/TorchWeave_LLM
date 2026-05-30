@@ -1,4 +1,8 @@
-import time, json, argparse, requests
+import argparse
+import json
+import time
+
+import requests
 
 
 def optimize(base_url, payload):

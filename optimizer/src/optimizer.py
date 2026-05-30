@@ -5,6 +5,7 @@ Stage model weights into a shared /artifacts volume so the server can load fast.
 
 import os
 import sys
+
 from huggingface_hub import snapshot_download
 
 MODEL = os.getenv("HF_MODEL", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")

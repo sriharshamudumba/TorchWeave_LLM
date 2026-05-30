@@ -3,16 +3,15 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Optional, List
+from typing import List, Optional
 
 import psutil
 import torch
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-
-from scheduler import ContinuousBatchingScheduler
 from model_runtime import ModelRuntime
+from pydantic import BaseModel
+from scheduler import ContinuousBatchingScheduler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

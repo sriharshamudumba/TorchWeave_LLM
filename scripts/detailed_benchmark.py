@@ -4,14 +4,14 @@ Updated TorchWeave Server Performance Benchmark
 Fixed to properly compare baseline vs optimized processing
 """
 
-import asyncio
-import time
-import statistics
 import argparse
+import asyncio
 import json
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
+import statistics
 import sys
+import time
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 try:
     import httpx

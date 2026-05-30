@@ -4,23 +4,18 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import time
-import json
-import psutil
-import asyncio
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, Request, HTTPException, Form
+import psutil
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM,
-    pipeline,
-    TextIteratorStreamer,
-)
+from transformers import (AutoModelForCausalLM, AutoTokenizer,
+                          TextIteratorStreamer, pipeline)
 
 # ------------------------------------------------------------------------------
 # App & CORS

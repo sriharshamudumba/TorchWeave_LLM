@@ -31,7 +31,7 @@ jobs:
           pip install black isort mypy flake8 flake8-bugbear
 
       - name: Check formatting (black)
-        run: black --check --diff src/ || black --check --diff .
+        run: black --check --diff .
 
       - name: Check import ordering (isort)
         run: isort --check-only --diff src/ || isort --check-only --diff .

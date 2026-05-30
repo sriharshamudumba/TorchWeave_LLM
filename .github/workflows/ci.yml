@@ -34,13 +34,17 @@ jobs:
         run: black --check --diff .
 
       - name: Check import ordering (isort)
-        run: isort --check-only --diff src/ || isort --check-only --diff .
+        run: isort --check-only --diff .
 
       - name: Lint (flake8)
-        run: flake8 src/ --max-line-length=100 --extend-ignore=E203,W503 || flake8 . --max-line-length=100 --extend-ignore=E203,W503 --exclude=venv,__pycache__,.git
+        run: |
+          flake8 . \
+            --max-line-length=100 \
+            --extend-ignore=E203,W503 \
+            --exclude=venv,__pycache__,.git,backups,workflows
 
       - name: Type check (mypy)
-        run: mypy src/ --ignore-missing-imports || mypy . --ignore-missing-imports --exclude venv
+        run: mypy . --ignore-missing-imports --exclude venv --exclude backups
         continue-on-error: true   # warn-only until stubs are complete
 
   # ─────────────────────────────────────────────────────────────────
@@ -89,7 +93,7 @@ jobs:
           ENVIRONMENT: test
         run: |
           pytest tests/ \
-            --cov=src \
+            --cov=. \
             --cov-report=xml \
             --cov-report=term-missing \
             --junitxml=junit.xml \

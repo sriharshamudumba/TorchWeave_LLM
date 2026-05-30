@@ -1,4 +1,4 @@
-﻿[tool.black]
+[tool.black]
 line-length = 88
 
 [tool.isort]

@@ -35,9 +35,9 @@ import torch
 @dataclass
 class SlotState:
     request_id: str
-    slot_idx:   int
-    seq_len:    int = 0
-    active:     bool = True
+    slot_idx: int
+    seq_len: int = 0
+    active: bool = True
 
 
 class ZeroCopyKVCache:
@@ -50,21 +50,21 @@ class ZeroCopyKVCache:
 
     def __init__(
         self,
-        num_layers:    int,
-        num_heads:     int,
-        head_dim:      int,
-        max_batch:     int   = 32,
-        max_seq_len:   int   = 2048,
-        dtype:         torch.dtype = torch.float16,
-        device:        str   = "cuda",
+        num_layers: int,
+        num_heads: int,
+        head_dim: int,
+        max_batch: int = 32,
+        max_seq_len: int = 2048,
+        dtype: torch.dtype = torch.float16,
+        device: str = "cuda",
     ):
-        self.num_layers  = num_layers
-        self.num_heads   = num_heads
-        self.head_dim    = head_dim
-        self.max_batch   = max_batch
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.head_dim = head_dim
+        self.max_batch = max_batch
         self.max_seq_len = max_seq_len
-        self.dtype       = dtype
-        self.device      = device
+        self.dtype = dtype
+        self.device = device
 
         # Pre-allocate slabs: [num_layers, max_batch, num_heads, max_seq, head_dim]
         # Contiguous layout so narrow() along dim=1 (slot) and dim=3 (seq) are free.
@@ -79,7 +79,7 @@ class ZeroCopyKVCache:
 
         # Stats
         self._total_allocs = 0
-        self._peak_active  = 0
+        self._peak_active = 0
 
     # ------------------------------------------------------------------
     # Slot management
@@ -124,9 +124,9 @@ class ZeroCopyKVCache:
     def write(
         self,
         request_id: str,
-        layer_idx:  int,
-        new_k:      torch.Tensor,  # [1, num_heads, new_seq_len, head_dim]
-        new_v:      torch.Tensor,
+        layer_idx: int,
+        new_k: torch.Tensor,  # [1, num_heads, new_seq_len, head_dim]
+        new_v: torch.Tensor,
     ):
         """
         Write new K/V into the slab slot for this request.
@@ -143,7 +143,7 @@ class ZeroCopyKVCache:
             We write columns 0..prompt_len-1.
         """
         state = self._slots[request_id]
-        slot  = state.slot_idx
+        slot = state.slot_idx
         new_seq = new_k.shape[2]
 
         # Write in-place into slab -- no cudaMalloc, no intermediate buffer
@@ -157,17 +157,17 @@ class ZeroCopyKVCache:
     def append_token(
         self,
         request_id: str,
-        layer_idx:  int,
-        new_k:      torch.Tensor,  # [1, num_heads, 1, head_dim]
-        new_v:      torch.Tensor,
+        layer_idx: int,
+        new_k: torch.Tensor,  # [1, num_heads, 1, head_dim]
+        new_v: torch.Tensor,
     ):
         """
         Append a single new token's K/V to an existing sequence.
         Called once per decode step per layer.
         """
-        state   = self._slots[request_id]
-        slot    = state.slot_idx
-        pos     = state.seq_len  # column to write into
+        state = self._slots[request_id]
+        slot = state.slot_idx
+        pos = state.seq_len  # column to write into
 
         if pos >= self.max_seq_len:
             raise RuntimeError(
@@ -184,7 +184,7 @@ class ZeroCopyKVCache:
     def read(
         self,
         request_id: str,
-        layer_idx:  int,
+        layer_idx: int,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Return (K, V) views for this request at this layer.
@@ -192,8 +192,8 @@ class ZeroCopyKVCache:
         Returns torch.narrow() views -- zero bytes copied.
         Shape: [1, num_heads, seq_len, head_dim]
         """
-        state   = self._slots[request_id]
-        slot    = state.slot_idx
+        state = self._slots[request_id]
+        slot = state.slot_idx
         seq_len = state.seq_len
 
         # narrow() returns a view into the slab, not a copy
@@ -204,7 +204,7 @@ class ZeroCopyKVCache:
     def read_batch(
         self,
         request_ids: List[str],
-        layer_idx:   int,
+        layer_idx: int,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Return batched (K, V) for multiple requests at one layer.
@@ -218,8 +218,8 @@ class ZeroCopyKVCache:
         prevent attending to padding positions.
         """
         max_seq = max(self._slots[rid].seq_len for rid in request_ids)
-        slots   = [self._slots[rid].slot_idx for rid in request_ids]
-        seqlens = [self._slots[rid].seq_len   for rid in request_ids]
+        slots = [self._slots[rid].slot_idx for rid in request_ids]
+        seqlens = [self._slots[rid].seq_len for rid in request_ids]
 
         # index_select pulls rows by slot index -- still a gather, not memcpy
         slot_tensor = torch.tensor(slots, dtype=torch.long, device=self.device)
@@ -236,20 +236,24 @@ class ZeroCopyKVCache:
 
     def stats(self) -> dict:
         active = len(self._slots)
-        slab_bytes = (
-            self.k_slab.nelement() + self.v_slab.nelement()
-        ) * (2 if self.dtype == torch.float16 else 4)
+        slab_bytes = (self.k_slab.nelement() + self.v_slab.nelement()) * (
+            2 if self.dtype == torch.float16 else 4
+        )
         used_bytes = (
-            active * self.num_layers * self.num_heads *
-            self.max_seq_len * self.head_dim *
-            (2 if self.dtype == torch.float16 else 4) * 2
+            active
+            * self.num_layers
+            * self.num_heads
+            * self.max_seq_len
+            * self.head_dim
+            * (2 if self.dtype == torch.float16 else 4)
+            * 2
         )
         return {
-            "active_slots":    active,
-            "free_slots":      len(self._free_slots),
-            "peak_active":     self._peak_active,
-            "total_allocs":    self._total_allocs,
-            "slab_size_mb":    slab_bytes / 1024 / 1024,
-            "used_mb":         used_bytes / 1024 / 1024,
+            "active_slots": active,
+            "free_slots": len(self._free_slots),
+            "peak_active": self._peak_active,
+            "total_allocs": self._total_allocs,
+            "slab_size_mb": slab_bytes / 1024 / 1024,
+            "used_mb": used_bytes / 1024 / 1024,
             "utilization_pct": (active / self.max_batch) * 100,
         }

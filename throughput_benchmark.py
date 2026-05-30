@@ -38,7 +38,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from server.scheduler import ContinuousBatchScheduler, SchedulerConfig, InferenceRequest
 from server.zero_copy_kv_cache import ZeroCopyKVCache
 
-
 # ---------------------------------------------------------------------------
 # Minimal step function for benchmarking
 # ---------------------------------------------------------------------------
@@ -51,9 +50,11 @@ _device = "cuda"
 def load_model(model_name: str):
     global _model, _tokenizer
     _tokenizer = AutoTokenizer.from_pretrained(model_name)
-    _model = AutoModelForCausalLM.from_pretrained(
-        model_name, torch_dtype=torch.float16
-    ).to(_device).eval()
+    _model = (
+        AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16)
+        .to(_device)
+        .eval()
+    )
     if _tokenizer.pad_token is None:
         _tokenizer.pad_token = _tokenizer.eos_token
 
@@ -68,15 +69,18 @@ async def step_fn_mock(batch: List[InferenceRequest]) -> Tuple[List[int], List[b
         # No model loaded: simulate 20ms per step (decode latency proxy)
         await asyncio.sleep(0.020)
         eos_id = 2
-        tokens = [eos_id if req.tokens_generated >= req.max_new_tokens - 1
-                  else 42 for req in batch]
+        tokens = [
+            eos_id if req.tokens_generated >= req.max_new_tokens - 1 else 42
+            for req in batch
+        ]
         finished = [t == eos_id for t in tokens]
         return tokens, finished
 
     # Batch the last token of each request
     input_ids = torch.tensor(
         [[_tokenizer.encode(req.prompt)[-1]] for req in batch],
-        dtype=torch.long, device=_device
+        dtype=torch.long,
+        device=_device,
     )
     with torch.no_grad():
         logits = _model(input_ids).logits[:, -1, :]
@@ -92,6 +96,7 @@ async def step_fn_mock(batch: List[InferenceRequest]) -> Tuple[List[int], List[b
 # ---------------------------------------------------------------------------
 # Baseline: sequential single-request serving
 # ---------------------------------------------------------------------------
+
 
 async def run_baseline(prompts: List[str], max_new_tokens: int) -> List[float]:
     """Serve requests one at a time. Returns per-request latency in ms."""
@@ -109,17 +114,18 @@ async def run_baseline(prompts: List[str], max_new_tokens: int) -> List[float]:
 # Continuous batching: all requests submitted simultaneously
 # ---------------------------------------------------------------------------
 
+
 async def run_continuous_batching(
-    prompts:        List[str],
+    prompts: List[str],
     max_new_tokens: int,
     max_batch_size: int,
 ) -> List[float]:
     """Submit all requests at t=0, measure per-request latency."""
     config = SchedulerConfig(
-        max_batch_size       = max_batch_size,
-        max_queue_size       = len(prompts) + 10,
-        max_wait_ms          = 10000.0,
-        schedule_interval_ms = 1.0,
+        max_batch_size=max_batch_size,
+        max_queue_size=len(prompts) + 10,
+        max_wait_ms=10000.0,
+        schedule_interval_ms=1.0,
     )
     scheduler = ContinuousBatchScheduler(config, step_fn_mock)
     await scheduler.start()
@@ -129,10 +135,10 @@ async def run_continuous_batching(
     t_submit = time.monotonic()
     for prompt in prompts:
         req = InferenceRequest(
-            request_id    = str(uuid.uuid4()),
-            prompt        = prompt,
-            max_new_tokens= max_new_tokens,
-            prompt_len    = len(prompt.split()),
+            request_id=str(uuid.uuid4()),
+            prompt=prompt,
+            max_new_tokens=max_new_tokens,
+            prompt_len=len(prompt.split()),
         )
         future = await scheduler.submit(req)
         futures.append((t_submit, future))
@@ -152,20 +158,21 @@ async def run_continuous_batching(
 # Report
 # ---------------------------------------------------------------------------
 
+
 def print_report(
-    baseline_lat:   List[float],
-    cb_lat:         List[float],
-    sched_stats:    dict,
+    baseline_lat: List[float],
+    cb_lat: List[float],
+    sched_stats: dict,
     max_new_tokens: int,
 ):
     def p(lat, pct):
         return sorted(lat)[int(pct * len(lat))]
 
     bl_throughput = len(baseline_lat) / (sum(baseline_lat) / 1000.0)
-    cb_throughput = len(cb_lat)       / (max(cb_lat) / 1000.0)  # wall-clock end-to-end
+    cb_throughput = len(cb_lat) / (max(cb_lat) / 1000.0)  # wall-clock end-to-end
 
     throughput_ratio = cb_throughput / bl_throughput
-    p95_reduction    = (1 - p(cb_lat, 0.95) / p(baseline_lat, 0.95)) * 100
+    p95_reduction = (1 - p(cb_lat, 0.95) / p(baseline_lat, 0.95)) * 100
 
     print("\n" + "=" * 65)
     print("  TorchWeave Continuous Batching Benchmark")
@@ -179,10 +186,18 @@ def print_report(
     print(f"  {'-' * 52}")
     print(f"  {'Throughput (req/s)':<28} {bl_throughput:>12.2f} {cb_throughput:>12.2f}")
     print(f"  {'Throughput ratio':<28} {'1.0x':>12} {throughput_ratio:>11.1f}x")
-    print(f"  {'P50 latency (ms)':<28} {p(baseline_lat, 0.50):>12.0f} {p(cb_lat, 0.50):>12.0f}")
-    print(f"  {'P95 latency (ms)':<28} {p(baseline_lat, 0.95):>12.0f} {p(cb_lat, 0.95):>12.0f}")
-    print(f"  {'P99 latency (ms)':<28} {p(baseline_lat, 0.99):>12.0f} {p(cb_lat, 0.99):>12.0f}")
-    print(f"  {'Avg step time (ms)':<28} {'N/A':>12} {sched_stats['avg_step_ms']:>12.1f}")
+    print(
+        f"  {'P50 latency (ms)':<28} {p(baseline_lat, 0.50):>12.0f} {p(cb_lat, 0.50):>12.0f}"
+    )
+    print(
+        f"  {'P95 latency (ms)':<28} {p(baseline_lat, 0.95):>12.0f} {p(cb_lat, 0.95):>12.0f}"
+    )
+    print(
+        f"  {'P99 latency (ms)':<28} {p(baseline_lat, 0.99):>12.0f} {p(cb_lat, 0.99):>12.0f}"
+    )
+    print(
+        f"  {'Avg step time (ms)':<28} {'N/A':>12} {sched_stats['avg_step_ms']:>12.1f}"
+    )
     print(f"  {'-' * 52}")
     print(f"  {'P95 latency reduction':<28} {p95_reduction:>11.1f}%")
     print("=" * 65)
@@ -191,25 +206,36 @@ def print_report(
     if throughput_ratio >= 3.5:
         print(f"  PASS: {throughput_ratio:.1f}x throughput (target: 4x)")
     else:
-        print(f"  NOTE: {throughput_ratio:.1f}x throughput -- "
-              f"increase --concurrency or --max-new-tokens to hit 4x")
+        print(
+            f"  NOTE: {throughput_ratio:.1f}x throughput -- "
+            f"increase --concurrency or --max-new-tokens to hit 4x"
+        )
 
     if p95_reduction >= 30:
         print(f"  PASS: {p95_reduction:.1f}% p95 reduction (target: 35%)")
     else:
-        print(f"  NOTE: {p95_reduction:.1f}% p95 reduction -- "
-              f"increase --num-requests for statistical stability")
+        print(
+            f"  NOTE: {p95_reduction:.1f}% p95 reduction -- "
+            f"increase --num-requests for statistical stability"
+        )
     print()
 
 
 async def main():
     parser = argparse.ArgumentParser(description="TorchWeave Throughput Benchmark")
-    parser.add_argument("--model",          default=None,
-                        help="HF model ID. Omit to use mock step (no GPU required).")
-    parser.add_argument("--num-requests",   type=int, default=200)
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="HF model ID. Omit to use mock step (no GPU required).",
+    )
+    parser.add_argument("--num-requests", type=int, default=200)
     parser.add_argument("--max-new-tokens", type=int, default=50)
-    parser.add_argument("--concurrency",    type=int, default=16,
-                        help="Max batch size for continuous batching.")
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=16,
+        help="Max batch size for continuous batching.",
+    )
     args = parser.parse_args()
 
     if args.model:
@@ -218,21 +244,29 @@ async def main():
 
     # Generate dummy prompts of mixed lengths (simulates real traffic)
     import random
+
     random.seed(42)
-    short_prompts  = ["Hello" * random.randint(1, 5)   for _ in range(args.num_requests // 2)]
-    long_prompts   = ["Hello" * random.randint(20, 60) for _ in range(args.num_requests // 2)]
-    prompts        = (short_prompts + long_prompts)
+    short_prompts = [
+        "Hello" * random.randint(1, 5) for _ in range(args.num_requests // 2)
+    ]
+    long_prompts = [
+        "Hello" * random.randint(20, 60) for _ in range(args.num_requests // 2)
+    ]
+    prompts = short_prompts + long_prompts
     random.shuffle(prompts)
 
     print(f"\nRunning BASELINE ({args.num_requests} requests, sequential)...")
-    baseline_lat = await run_baseline(prompts[:min(20, args.num_requests)],
-                                      args.max_new_tokens)
+    baseline_lat = await run_baseline(
+        prompts[: min(20, args.num_requests)], args.max_new_tokens
+    )
     # Extrapolate baseline to full N (it's purely sequential)
     avg_single = statistics.mean(baseline_lat)
     baseline_lat_full = [avg_single] * args.num_requests
 
-    print(f"Running CONTINUOUS BATCHING ({args.num_requests} requests, "
-          f"batch={args.concurrency})...")
+    print(
+        f"Running CONTINUOUS BATCHING ({args.num_requests} requests, "
+        f"batch={args.concurrency})..."
+    )
     cb_lat, sched_stats = await run_continuous_batching(
         prompts, args.max_new_tokens, args.concurrency
     )

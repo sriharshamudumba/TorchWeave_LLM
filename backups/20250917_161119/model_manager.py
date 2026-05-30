@@ -37,6 +37,7 @@ app.add_middleware(
 
 DEVICE = "cpu"  # keep simple/portable; override later if you add CUDA
 
+
 # ------------------------------------------------------------------------------
 # In-memory registry/state
 # ------------------------------------------------------------------------------
@@ -48,7 +49,9 @@ class LoadedModel(BaseModel):
     device: str = DEVICE
 
 
-MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {}  # model_id -> {"pipe": pipeline, "tokenizer":..., "model":...}
+MODEL_REGISTRY: Dict[str, Dict[str, Any]] = (
+    {}
+)  # model_id -> {"pipe": pipeline, "tokenizer":..., "model":...}
 LOADED_MODELS: Dict[str, LoadedModel] = {}
 
 # A simple catalog shown by /models/available
@@ -79,6 +82,7 @@ AVAILABLE_MODELS = [
     },
 ]
 
+
 # ------------------------------------------------------------------------------
 # Request/Response models
 # ------------------------------------------------------------------------------
@@ -87,6 +91,7 @@ class LoadModelBody(BaseModel):
     custom_model_id: Optional[str] = Field(
         None, description="Alternate field used by some UIs"
     )
+
 
 class GenerateBody(BaseModel):
     model_id: Optional[str] = None
@@ -103,6 +108,7 @@ class GenerateBody(BaseModel):
     repetition_penalty: Optional[float] = None
     use_chat_template: Optional[bool] = False
 
+
 # ------------------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------------------
@@ -113,17 +119,22 @@ def _mem_usage_str() -> str:
     except Exception:
         return "unknown"
 
+
 def _now_iso() -> str:
     try:
         return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
     except Exception:
         return ""
 
+
 def _resolve_model_id(payload: dict) -> str:
     m = (payload or {}).get("model_id") or (payload or {}).get("custom_model_id")
     if not m:
-        raise HTTPException(status_code=400, detail="model_id or custom_model_id is required")
+        raise HTTPException(
+            status_code=400, detail="model_id or custom_model_id is required"
+        )
     return m
+
 
 async def _read_payload_json_or_form(request: Request) -> dict:
     """
@@ -131,22 +142,25 @@ async def _read_payload_json_or_form(request: Request) -> dict:
     This makes the endpoint compatible with both frontend JSON and curl -F.
     """
     content_type = request.headers.get("content-type", "")
-    
+
     # Handle JSON requests
     if "application/json" in content_type.lower():
         try:
             return await request.json()
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
-    
+
     # Handle form data requests
-    if "multipart/form-data" in content_type.lower() or "application/x-www-form-urlencoded" in content_type.lower():
+    if (
+        "multipart/form-data" in content_type.lower()
+        or "application/x-www-form-urlencoded" in content_type.lower()
+    ):
         try:
             form = await request.form()
             return {k: v for k, v in form.items()}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid form data: {e}")
-    
+
     # Try to read as JSON from body as fallback
     try:
         body = await request.body()
@@ -155,6 +169,7 @@ async def _read_payload_json_or_form(request: Request) -> dict:
         return {}
     except Exception:
         return {}
+
 
 def _build_generate_kwargs(body: GenerateBody) -> Dict[str, Any]:
     gen_kwargs: Dict[str, Any] = {}
@@ -184,6 +199,7 @@ def _build_generate_kwargs(body: GenerateBody) -> Dict[str, Any]:
 
     return gen_kwargs
 
+
 def _ensure_pipe(model_id: str):
     if model_id in MODEL_REGISTRY:
         return MODEL_REGISTRY[model_id]["pipe"]
@@ -196,9 +212,13 @@ def _ensure_pipe(model_id: str):
         "text-generation",
         model=model,
         tokenizer=tokenizer,
-        device=-1,   # CPU; change to a CUDA device id if you add GPU later
+        device=-1,  # CPU; change to a CUDA device id if you add GPU later
     )
-    MODEL_REGISTRY[model_id] = {"pipe": text_gen, "tokenizer": tokenizer, "model": model}
+    MODEL_REGISTRY[model_id] = {
+        "pipe": text_gen,
+        "tokenizer": tokenizer,
+        "model": model,
+    }
 
     # Update LOADED_MODELS table for /models/loaded
     LOADED_MODELS[model_id] = LoadedModel(
@@ -210,21 +230,26 @@ def _ensure_pipe(model_id: str):
     )
     return text_gen
 
+
 # ------------------------------------------------------------------------------
 # Endpoints
 # ------------------------------------------------------------------------------
+
 
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "model-manager", "port": 8001}
 
+
 @app.get("/models/available")
 def models_available():
     return {"available_models": AVAILABLE_MODELS}
 
+
 @app.get("/models/loaded")
 def models_loaded():
     return {"loaded_models": [m.model_dump() for m in LOADED_MODELS.values()]}
+
 
 @app.get("/system/stats")
 def system_stats():
@@ -242,6 +267,7 @@ def system_stats():
         "loaded_models": list(LOADED_MODELS.keys()),
         "service": "model-manager",
     }
+
 
 @app.post("/models/load")
 async def load_model(request: Request):
@@ -270,7 +296,10 @@ async def load_model(request: Request):
             "status_code": 200,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load model {model_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to load model {model_id}: {e}"
+        )
+
 
 @app.post("/models/generate")
 async def generate(request: Request):
@@ -280,7 +309,7 @@ async def generate(request: Request):
     """
     try:
         payload = await _read_payload_json_or_form(request)
-        
+
         # Convert form data to proper types if needed
         if isinstance(payload.get("max_length"), str):
             payload["max_length"] = int(payload["max_length"])
@@ -311,7 +340,9 @@ async def generate(request: Request):
     try:
         text_gen = _ensure_pipe(model_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load model {model_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to load model {model_id}: {e}"
+        )
 
     # Prepare generation kwargs
     gen_kwargs = _build_generate_kwargs(data)
@@ -340,7 +371,7 @@ async def generate(request: Request):
             generated_text = outputs[0]["generated_text"]
             # Remove the input prompt from generated text to show only new content
             if generated_text.startswith(prompt):
-                generated_text = generated_text[len(prompt):].strip()
+                generated_text = generated_text[len(prompt) :].strip()
             # Estimate token count
             full_ids = tokenizer.encode(generated_text, add_special_tokens=False)
             token_count = len(full_ids)

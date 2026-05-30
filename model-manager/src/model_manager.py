@@ -37,6 +37,7 @@ app.add_middleware(
 
 DEVICE = "cpu"  # keep simple/portable; override later if you add CUDA
 
+
 # ------------------------------------------------------------------------------
 # In-memory registry/state
 # ------------------------------------------------------------------------------
@@ -48,7 +49,9 @@ class LoadedModel(BaseModel):
     device: str = DEVICE
 
 
-MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {}  # model_id -> {"pipe": pipeline, "tokenizer":..., "model":...}
+MODEL_REGISTRY: Dict[str, Dict[str, Any]] = (
+    {}
+)  # model_id -> {"pipe": pipeline, "tokenizer":..., "model":...}
 LOADED_MODELS: Dict[str, LoadedModel] = {}
 
 # A simple catalog shown by /models/available
@@ -79,6 +82,7 @@ AVAILABLE_MODELS = [
     },
 ]
 
+
 # ------------------------------------------------------------------------------
 # Request/Response models
 # ------------------------------------------------------------------------------
@@ -87,6 +91,7 @@ class LoadModelBody(BaseModel):
     custom_model_id: Optional[str] = Field(
         None, description="Alternate field used by some UIs"
     )
+
 
 class GenerateBody(BaseModel):
     model_id: Optional[str] = None
@@ -103,6 +108,7 @@ class GenerateBody(BaseModel):
     repetition_penalty: Optional[float] = None
     use_chat_template: Optional[bool] = False
 
+
 # ------------------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------------------
@@ -113,17 +119,22 @@ def _mem_usage_str() -> str:
     except Exception:
         return "unknown"
 
+
 def _now_iso() -> str:
     try:
         return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
     except Exception:
         return ""
 
+
 def _resolve_model_id(payload: dict) -> str:
     m = (payload or {}).get("model_id") or (payload or {}).get("custom_model_id")
     if not m:
-        raise HTTPException(status_code=400, detail="model_id or custom_model_id is required")
+        raise HTTPException(
+            status_code=400, detail="model_id or custom_model_id is required"
+        )
     return m
+
 
 async def _read_payload_json_or_form(request: Request) -> dict:
     """
@@ -131,22 +142,25 @@ async def _read_payload_json_or_form(request: Request) -> dict:
     This makes the endpoint compatible with both frontend JSON and curl -F.
     """
     content_type = request.headers.get("content-type", "")
-    
+
     # Handle JSON requests
     if "application/json" in content_type.lower():
         try:
             return await request.json()
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
-    
+
     # Handle form data requests
-    if "multipart/form-data" in content_type.lower() or "application/x-www-form-urlencoded" in content_type.lower():
+    if (
+        "multipart/form-data" in content_type.lower()
+        or "application/x-www-form-urlencoded" in content_type.lower()
+    ):
         try:
             form = await request.form()
             return {k: v for k, v in form.items()}
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid form data: {e}")
-    
+
     # Try to read as JSON from body as fallback
     try:
         body = await request.body()
@@ -155,6 +169,7 @@ async def _read_payload_json_or_form(request: Request) -> dict:
         return {}
     except Exception:
         return {}
+
 
 def _build_generate_kwargs(body: GenerateBody) -> Dict[str, Any]:
     gen_kwargs: Dict[str, Any] = {}
@@ -180,12 +195,13 @@ def _build_generate_kwargs(body: GenerateBody) -> Dict[str, Any]:
     gen_kwargs["do_sample"] = True
     gen_kwargs["pad_token_id"] = 50256  # GPT-2 EOS token
     gen_kwargs["eos_token_id"] = 50256
-    
+
     # Ensure minimum generation
     if "max_new_tokens" not in gen_kwargs and "max_length" not in gen_kwargs:
         gen_kwargs["max_new_tokens"] = 50
 
     return gen_kwargs
+
 
 def _ensure_pipe(model_id: str):
     if model_id in MODEL_REGISTRY:
@@ -198,15 +214,19 @@ def _ensure_pipe(model_id: str):
         tokenizer.pad_token = tokenizer.eos_token
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
-        
+
     model = AutoModelForCausalLM.from_pretrained(model_id)
     text_gen = pipeline(
         "text-generation",
         model=model,
         tokenizer=tokenizer,
-        device=-1,   # CPU; change to a CUDA device id if you add GPU later
+        device=-1,  # CPU; change to a CUDA device id if you add GPU later
     )
-    MODEL_REGISTRY[model_id] = {"pipe": text_gen, "tokenizer": tokenizer, "model": model}
+    MODEL_REGISTRY[model_id] = {
+        "pipe": text_gen,
+        "tokenizer": tokenizer,
+        "model": model,
+    }
 
     # Update LOADED_MODELS table for /models/loaded
     LOADED_MODELS[model_id] = LoadedModel(
@@ -218,21 +238,26 @@ def _ensure_pipe(model_id: str):
     )
     return text_gen
 
+
 # ------------------------------------------------------------------------------
 # Endpoints
 # ------------------------------------------------------------------------------
+
 
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "model-manager", "port": 8001}
 
+
 @app.get("/models/available")
 def models_available():
     return {"available_models": AVAILABLE_MODELS}
 
+
 @app.get("/models/loaded")
 def models_loaded():
     return {"loaded_models": [m.model_dump() for m in LOADED_MODELS.values()]}
+
 
 @app.get("/system/stats")
 def system_stats():
@@ -250,6 +275,7 @@ def system_stats():
         "loaded_models": list(LOADED_MODELS.keys()),
         "service": "model-manager",
     }
+
 
 @app.post("/models/load")
 async def load_model(request: Request):
@@ -278,7 +304,10 @@ async def load_model(request: Request):
             "status_code": 200,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load model {model_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to load model {model_id}: {e}"
+        )
+
 
 @app.post("/models/generate")
 async def generate(request: Request):
@@ -288,7 +317,7 @@ async def generate(request: Request):
     """
     try:
         payload = await _read_payload_json_or_form(request)
-        
+
         # Convert form data to proper types if needed
         if isinstance(payload.get("max_length"), str):
             payload["max_length"] = int(payload["max_length"])
@@ -319,7 +348,9 @@ async def generate(request: Request):
     try:
         text_gen = _ensure_pipe(model_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load model {model_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to load model {model_id}: {e}"
+        )
 
     # Prepare generation kwargs
     gen_kwargs = _build_generate_kwargs(data)
@@ -343,32 +374,34 @@ async def generate(request: Request):
     t0_dec = time.time()
     generated_text = ""
     token_count = 0
-    
+
     try:
         if outputs and isinstance(outputs, list) and len(outputs) > 0:
             raw_output = outputs[0]
-            
+
             if isinstance(raw_output, dict) and "generated_text" in raw_output:
                 full_generated = raw_output["generated_text"]
-                
+
                 # More robust prompt removal
                 if full_generated.startswith(prompt):
-                    generated_text = full_generated[len(prompt):].strip()
+                    generated_text = full_generated[len(prompt) :].strip()
                 else:
                     # Fallback: find the prompt in the output and remove everything before it
                     prompt_pos = full_generated.find(prompt)
                     if prompt_pos >= 0:
-                        generated_text = full_generated[prompt_pos + len(prompt):].strip()
+                        generated_text = full_generated[
+                            prompt_pos + len(prompt) :
+                        ].strip()
                     else:
                         # If prompt not found, use the full output
                         generated_text = full_generated.strip()
-                
+
                 # Ensure we have some output - if still empty after prompt removal
                 if not generated_text and full_generated.strip():
                     # Use everything after the first newline or significant break
-                    lines = full_generated.split('\n')
+                    lines = full_generated.split("\n")
                     if len(lines) > 1:
-                        generated_text = '\n'.join(lines[1:]).strip()
+                        generated_text = "\n".join(lines[1:]).strip()
                     elif len(full_generated.strip()) > len(prompt.strip()) + 5:
                         # Use second half if no line breaks and significantly longer
                         mid_point = len(prompt)
@@ -376,28 +409,32 @@ async def generate(request: Request):
                     else:
                         # Last resort - show that generation occurred
                         generated_text = full_generated.strip()
-                
+
                 # Calculate token count
                 if generated_text:
                     try:
-                        tokens = tokenizer.encode(generated_text, add_special_tokens=False)
+                        tokens = tokenizer.encode(
+                            generated_text, add_special_tokens=False
+                        )
                         token_count = len(tokens)
                     except:
                         token_count = max(1, len(generated_text.split()))
-                
+
             else:
                 generated_text = str(raw_output) if raw_output else ""
-                token_count = max(1, len(generated_text.split())) if generated_text else 0
-                
+                token_count = (
+                    max(1, len(generated_text.split())) if generated_text else 0
+                )
+
         else:
             generated_text = ""
             token_count = 0
-            
+
     except Exception as e:
         logger.error(f"Error processing generated text: {e}", exc_info=True)
         generated_text = f"Error processing output: {str(e)}"
         token_count = 0
-    
+
     decoding_time = time.time() - t0_dec
 
     total_time = time.time() - t0_total

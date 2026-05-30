@@ -1,5 +1,6 @@
 import torch
 
+
 def enable_flash(model):
     """
     Enables flash attention variants when supported.

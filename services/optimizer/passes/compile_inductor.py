@@ -1,5 +1,6 @@
 import torch
 
+
 def maybe_compile(model, backend: str | None):
     """
     Wraps model with torch.compile for fused kernels (Inductor).
